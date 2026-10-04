@@ -70,6 +70,7 @@ class RobotRepository(context: Context) {
     private var retryJob: Job? = null
     private var attempt = 0
     private var connecting = false
+    private var rediscoverDone = false
 
     init {
         val saved = store.loadRobots()
@@ -101,6 +102,22 @@ class RobotRepository(context: Context) {
         }
     }
 
+    /** Update a saved robot (name/ip), reconnecting if it is the active one. */
+    fun updateRobot(config: RobotConfig) {
+        val list = _robots.value.toMutableList()
+        val index = list.indexOfFirst { it.blid == config.blid }
+        if (index < 0) return
+        list[index] = config
+        _robots.value = list
+        store.saveRobots(list)
+        if (_selected.value?.blid == config.blid) {
+            disconnect()
+            setSelected(config)
+            _state.value = null
+            connect()
+        }
+    }
+
     fun selectRobot(blid: String, force: Boolean = false) {
         val config = _robots.value.firstOrNull { it.blid == blid } ?: return
         if (!force && _selected.value?.blid == blid && (connecting || client != null)) return
@@ -114,6 +131,7 @@ class RobotRepository(context: Context) {
     fun connect() {
         if (client != null || connecting) return
         if (_selected.value == null) return
+        rediscoverDone = false
         connecting = true
         attempt = 0
         master = JSONObject()
@@ -264,6 +282,11 @@ class RobotRepository(context: Context) {
                     delay(backoffMillis(attempt))
                     if (connecting) startConnect()
                 }
+            } else if (connecting && !rediscoverDone) {
+                // The saved IP may be stale (DHCP changed it). Look the robot
+                // up on the LAN by its unique BLID and reconnect to the new IP.
+                rediscoverDone = true
+                retryJob = scope.launch { rediscoverAndReconnect() }
             } else {
                 connecting = false
                 _status.value = ConnectionStatus.Error(message)
@@ -277,6 +300,39 @@ class RobotRepository(context: Context) {
 
     private fun backoffMillis(attempt: Int): Long =
         (1500L * attempt).coerceIn(1500L, 10_000L)
+
+    private suspend fun rediscoverAndReconnect() {
+        _status.value = ConnectionStatus.Connecting
+        logEvent("↻ ищу робота в сети (IP мог измениться)")
+        val found = runCatching { RobotDiscovery.discover(appContext) }.getOrDefault(emptyList())
+        val config = _selected.value
+        val match = found.firstOrNull { config != null && it.blid == config.blid }
+        when {
+            config == null -> {
+                connecting = false
+                _status.value = ConnectionStatus.Error("Робот не выбран")
+            }
+            match != null && match.ip != config.ip -> {
+                val updated = config.copy(ip = match.ip)
+                val list = _robots.value.map { if (it.blid == updated.blid) updated else it }
+                _robots.value = list
+                store.saveRobots(list)
+                setSelected(updated)
+                logEvent("✓ новый IP: ${match.ip}")
+                master = JSONObject()
+                startConnect()
+            }
+            match != null -> {
+                startConnect()
+            }
+            else -> {
+                connecting = false
+                _status.value = ConnectionStatus.Error(
+                    "Робот не найден в сети — укажите IP вручную",
+                )
+            }
+        }
+    }
 
     private fun updateSensorDeltas(state: RobotState, running: Boolean) {
         val health = state.health ?: return
@@ -373,7 +429,7 @@ class RobotRepository(context: Context) {
     }
 
     private companion object {
-        const val MAX_CONNECT_ATTEMPTS = 8
+        const val MAX_CONNECT_ATTEMPTS = 3
 
         val AUTH_REASON_CODES = setOf(
             MqttException.REASON_CODE_FAILED_AUTHENTICATION.toInt(),

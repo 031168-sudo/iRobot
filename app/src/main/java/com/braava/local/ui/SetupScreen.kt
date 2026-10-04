@@ -16,11 +16,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.VpnKey
 import androidx.compose.material3.Button
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -49,6 +51,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.braava.local.data.RobotConfig
 import com.braava.local.data.cloud.IrobotCloud
 import com.braava.local.data.discovery.RobotDiscovery
 
@@ -61,7 +64,9 @@ fun SetupScreen(
     val busy by viewModel.busy.collectAsStateWithLifecycle()
     val robots by viewModel.robots.collectAsStateWithLifecycle()
     val selected by viewModel.config.collectAsStateWithLifecycle()
+    val discovered by viewModel.discovered.collectAsStateWithLifecycle()
     var tab by remember { mutableIntStateOf(0) }
+    var editing by remember { mutableStateOf<RobotConfig?>(null) }
 
     Column(
         modifier = modifier
@@ -99,6 +104,7 @@ fun SetupScreen(
                         onClose?.invoke()
                     },
                     onRemove = { viewModel.removeRobot(robot.blid) },
+                    onEdit = { editing = robot },
                 )
                 Spacer(Modifier.height(8.dp))
             }
@@ -128,6 +134,99 @@ fun SetupScreen(
         }
         Spacer(Modifier.height(32.dp))
     }
+
+    editing?.let { robot ->
+        EditRobotDialog(
+            robot = robot,
+            discovered = discovered,
+            busy = busy,
+            onDiscover = { viewModel.discover() },
+            onDismiss = { editing = null },
+            onSave = { ip, name ->
+                viewModel.updateRobot(robot.copy(ip = ip, name = name))
+                editing = null
+            },
+        )
+    }
+}
+
+@Composable
+private fun EditRobotDialog(
+    robot: RobotConfig,
+    discovered: List<RobotDiscovery.Found>,
+    busy: Boolean,
+    onDiscover: () -> Unit,
+    onDismiss: () -> Unit,
+    onSave: (ip: String, name: String?) -> Unit,
+) {
+    var ip by remember { mutableStateOf(robot.ip) }
+    var name by remember { mutableStateOf(robot.name.orEmpty()) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(
+                onClick = { onSave(ip.trim(), name.trim().takeIf { it.isNotBlank() }) },
+                enabled = ip.isNotBlank(),
+            ) { Text("Сохранить") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } },
+        title = { Text("Изменить робота") },
+        text = {
+            Column(
+                Modifier
+                    .height(420.dp)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                Text(
+                    "BLID: ${robot.blid}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(10.dp))
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Имя") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        value = ip,
+                        onValueChange = { ip = it },
+                        label = { Text("IP-адрес") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                        modifier = Modifier.weight(1f),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    FilledTonalButton(onClick = onDiscover) {
+                        Icon(Icons.Filled.Search, contentDescription = null)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Найти")
+                    }
+                }
+                if (busy) {
+                    Spacer(Modifier.height(10.dp))
+                    CircularProgressIndicator()
+                }
+                if (discovered.isNotEmpty()) {
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        "Найденные в сети:",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    DiscoveredList(discovered) { found ->
+                        ip = found.ip
+                        if (name.isBlank()) name = found.robotName.orEmpty()
+                    }
+                }
+            }
+        },
+    )
 }
 
 @Composable
@@ -137,6 +236,7 @@ private fun SavedRobotCard(
     selected: Boolean,
     onSelect: () -> Unit,
     onRemove: () -> Unit,
+    onEdit: () -> Unit,
 ) {
     Card(
         onClick = onSelect,
@@ -160,6 +260,9 @@ private fun SavedRobotCard(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+            IconButton(onClick = onEdit) {
+                Icon(Icons.Filled.Edit, contentDescription = "Изменить")
             }
             IconButton(onClick = onRemove) {
                 Icon(Icons.Filled.Delete, contentDescription = "Удалить")

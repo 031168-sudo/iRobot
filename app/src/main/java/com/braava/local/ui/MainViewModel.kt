@@ -157,6 +157,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun removeRobot(blid: String) = repository.removeRobot(blid)
 
+    fun updateRobot(config: RobotConfig) = repository.updateRobot(config)
+
     fun saveManual(blid: String, password: String, ip: String, name: String?): Boolean {
         if (blid.isBlank() || password.isBlank() || ip.isBlank()) {
             _error.value = "Заполните BLID, пароль и IP-адрес"
