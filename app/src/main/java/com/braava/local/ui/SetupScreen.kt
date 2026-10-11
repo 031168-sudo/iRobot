@@ -136,97 +136,12 @@ fun SetupScreen(
     }
 
     editing?.let { robot ->
-        EditRobotDialog(
+        RobotEditDialog(
+            viewModel = viewModel,
             robot = robot,
-            discovered = discovered,
-            busy = busy,
-            onDiscover = { viewModel.discover() },
             onDismiss = { editing = null },
-            onSave = { ip, name ->
-                viewModel.updateRobot(robot.copy(ip = ip, name = name))
-                editing = null
-            },
         )
     }
-}
-
-@Composable
-private fun EditRobotDialog(
-    robot: RobotConfig,
-    discovered: List<RobotDiscovery.Found>,
-    busy: Boolean,
-    onDiscover: () -> Unit,
-    onDismiss: () -> Unit,
-    onSave: (ip: String, name: String?) -> Unit,
-) {
-    var ip by remember { mutableStateOf(robot.ip) }
-    var name by remember { mutableStateOf(robot.name.orEmpty()) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        confirmButton = {
-            TextButton(
-                onClick = { onSave(ip.trim(), name.trim().takeIf { it.isNotBlank() }) },
-                enabled = ip.isNotBlank(),
-            ) { Text("Сохранить") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } },
-        title = { Text("Изменить робота") },
-        text = {
-            Column(
-                Modifier
-                    .height(420.dp)
-                    .verticalScroll(rememberScrollState()),
-            ) {
-                Text(
-                    "BLID: ${robot.blid}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(Modifier.height(10.dp))
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    label = { Text("Имя") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Spacer(Modifier.height(8.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(
-                        value = ip,
-                        onValueChange = { ip = it },
-                        label = { Text("IP-адрес") },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-                        modifier = Modifier.weight(1f),
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    FilledTonalButton(onClick = onDiscover) {
-                        Icon(Icons.Filled.Search, contentDescription = null)
-                        Spacer(Modifier.width(6.dp))
-                        Text("Найти")
-                    }
-                }
-                if (busy) {
-                    Spacer(Modifier.height(10.dp))
-                    CircularProgressIndicator()
-                }
-                if (discovered.isNotEmpty()) {
-                    Spacer(Modifier.height(10.dp))
-                    Text(
-                        "Найденные в сети:",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    DiscoveredList(discovered) { found ->
-                        ip = found.ip
-                        if (name.isBlank()) name = found.robotName.orEmpty()
-                    }
-                }
-            }
-        },
-    )
 }
 
 @Composable
@@ -548,7 +463,7 @@ private fun RobotCard(
 }
 
 @Composable
-private fun DiscoveredList(
+fun DiscoveredList(
     found: List<RobotDiscovery.Found>,
     onPick: (RobotDiscovery.Found) -> Unit,
 ) {

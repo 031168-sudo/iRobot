@@ -204,9 +204,24 @@ class RobotRepository(context: Context) {
         sendCommand("start", JSONObject().put("regions", regions))
     }
 
+
     fun loadCloudMaps(blid: String): List<CloudMap> = cloudMapStore.load(blid)
 
     fun saveCloudMaps(blid: String, maps: List<CloudMap>) = cloudMapStore.save(blid, maps)
+
+    /** Raw local map report (`reported.pmaps` + nav stats) for diagnostics. */
+    fun localMapDiagnostics(): String {
+        val reported = master.optJSONObject("state")?.optJSONObject("reported")
+            ?: return "(телеметрия ещё не получена)"
+        val pmaps = reported.optJSONArray("pmaps")
+        val nav = reported.optJSONObject("mssnNavStats")
+        return JSONObject()
+            .apply {
+                if (pmaps != null) put("pmaps", pmaps)
+                if (nav != null) put("mssnNavStats", nav)
+            }
+            .toString(2)
+    }
 
     fun loadMissionHistory(blid: String): List<MissionEntry> = missionHistoryStore.load(blid)
 

@@ -94,6 +94,31 @@ fun ControlScreen(
     var healthOpen by remember { mutableStateOf(false) }
     var cloudMapOpen by remember { mutableStateOf(false) }
     var historyOpen by remember { mutableStateOf(false) }
+    var editRobotOpen by remember { mutableStateOf(false) }
+
+    val diagnosticsExport by viewModel.diagnosticsExport.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    LaunchedEffect(diagnosticsExport) {
+        val text = diagnosticsExport ?: return@LaunchedEffect
+        val dir = java.io.File(context.cacheDir, "diagnostics").apply { mkdirs() }
+        val file = java.io.File(dir, "braavalocal-diagnostics.txt")
+        runCatching { file.writeText(text) }
+        runCatching {
+            val uri = androidx.core.content.FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fileprovider",
+                file,
+            )
+            val intent = Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_SUBJECT, "BraavaLocal: диагностика")
+                putExtra(Intent.EXTRA_STREAM, uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            context.startActivity(Intent.createChooser(intent, "Отправить диагностику"))
+        }
+        viewModel.clearDiagnosticsExport()
+    }
 
     Scaffold(
         modifier = modifier,
@@ -154,6 +179,20 @@ fun ControlScreen(
                             },
                         )
                         DropdownMenuItem(
+                            text = { Text("Обучить карту (train)") },
+                            onClick = {
+                                menuOpen = false
+                                viewModel.command("train")
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Сохранить диагностику (файл)") },
+                            onClick = {
+                                menuOpen = false
+                                viewModel.exportDiagnostics()
+                            },
+                        )
+                        DropdownMenuItem(
                             text = { Text("Диагностика подключения") },
                             onClick = {
                                 menuOpen = false
@@ -189,13 +228,15 @@ fun ControlScreen(
             }
             if (status is ConnectionStatus.Error) {
                 Card(
+                    onClick = { editRobotOpen = true },
                     colors = CardDefaults.cardColors(
                         containerColor = MaterialTheme.colorScheme.errorContainer,
                     ),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text(
-                        (status as ConnectionStatus.Error).message,
+                        (status as ConnectionStatus.Error).message +
+                            "\nНажмите, чтобы изменить IP или найти робота",
                         modifier = Modifier.padding(12.dp),
                         color = MaterialTheme.colorScheme.onErrorContainer,
                     )
@@ -310,6 +351,14 @@ fun ControlScreen(
             historyOpen = false
             viewModel.resetHistory()
         }
+    }
+
+    if (editRobotOpen) {
+        RobotEditDialog(
+            viewModel = viewModel,
+            robot = config,
+            onDismiss = { editRobotOpen = false },
+        )
     }
 }
 

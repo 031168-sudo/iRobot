@@ -11,6 +11,7 @@ import com.braava.local.data.cloud.LocalPasswordFetcher
 import com.braava.local.data.discovery.RobotDiscovery
 import com.braava.local.data.model.CloudMap
 import com.braava.local.data.model.CloudRegion
+import com.braava.local.data.model.CloudRoom
 import com.braava.local.data.model.MissionEntry
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -46,6 +47,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _diagnostics = MutableStateFlow<List<String>?>(null)
     val diagnostics = _diagnostics.asStateFlow()
+
+    private val _diagnosticsExport = MutableStateFlow<String?>(null)
+    val diagnosticsExport = _diagnosticsExport.asStateFlow()
 
     private val cloud = IrobotCloud()
     private var cloudSession: IrobotCloud.Session? = null
@@ -283,6 +287,85 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _diagnostics.value = null
     }
 
+    fun clearDiagnosticsExport() {
+        _diagnosticsExport.value = null
+    }
+
+    /**
+     * Build one text report for troubleshooting: the robot's raw local map
+     * report (`reported.pmaps`) plus the raw cloud `pmaps`/`missionhistory`
+     * (when logged in). Used to tell whether a `train` run changes the map.
+     */
+    fun exportDiagnostics() {
+        viewModelScope.launch {
+            val config = repository.selected.value
+            val blid = currentBlid()
+            val stamp = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US)
+                .format(java.util.Date())
+            val sb = StringBuilder()
+            sb.appendLine("BraavaLocal diagnostics")
+            sb.appendLine("time=$stamp")
+            sb.appendLine("robot=${config?.name} blid=$blid")
+            sb.appendLine()
+            sb.appendLine("=== LOCAL reported: pmaps + mssnNavStats ===")
+            sb.appendLine(repository.localMapDiagnostics())
+            sb.appendLine()
+            val session = cloudSession
+            if (session == null || blid == null) {
+                sb.appendLine("=== CLOUD ===")
+                sb.appendLine("(нет входа в облако — откройте «Карты» и нажмите «Обновить из облака»)")
+            } else {
+                val pmapsRaw = runCatching { cloud.getPmaps(session, blid) }
+                    .getOrElse { "ошибка: ${it.message}" }
+                sb.appendLine("=== CLOUD pmaps ===")
+                sb.appendLine(pmapsRaw)
+                sb.appendLine()
+                appendUmfComparison(sb, session, blid, pmapsRaw)
+                sb.appendLine()
+                sb.appendLine("=== CLOUD missionhistory ===")
+                sb.appendLine(
+                    runCatching { cloud.getMissionHistory(session, blid) }
+                        .getOrElse { "ошибка: ${it.message}" },
+                )
+            }
+            _diagnosticsExport.value = sb.toString()
+        }
+    }
+
+    /**
+     * For every plan whose latest robot version differs from the active one
+     * (e.g. right after `train`), fetch both UMFs and report their geometry so
+     * we can tell whether the trained version actually contains a map.
+     */
+    private suspend fun appendUmfComparison(
+        sb: StringBuilder,
+        session: IrobotCloud.Session,
+        blid: String,
+        pmapsRaw: String,
+    ) {
+        val array = runCatching { JSONArray(pmapsRaw) }.getOrNull() ?: return
+        sb.appendLine("=== CLOUD UMF: active vs robot version ===")
+        for (i in 0 until array.length()) {
+            val obj = array.optJSONObject(i) ?: continue
+            val pmapId = obj.optString("pmap_id")
+            val active = obj.optString("active_pmapv_id")
+            val robot = obj.optString("robot_pmapv_id")
+            if (pmapId.isBlank() || robot.isBlank() || robot == active) continue
+            sb.appendLine("pmap=$pmapId active=$active robot=$robot")
+            listOf("active" to active, "robot" to robot).forEach { (label, version) ->
+                if (version.isBlank()) return@forEach
+                val line = runCatching {
+                    val umf = cloud.getUmf(session, blid, pmapId, version)
+                    val geo = parseUmf(umf)
+                    "$label $version -> точек=${geo.points.size} " +
+                        "полигонов=${geo.polygons.size} комнат=${geo.rooms.size} " +
+                        "символов=${umf.toString().length}"
+                }.getOrElse { "$label $version -> ошибка: ${it.message}" }
+                sb.appendLine("  $line")
+            }
+        }
+    }
+
     // ----- cloud map -----
 
     private fun currentBlid(): String? {
@@ -337,7 +420,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val blid = currentBlid()
                     ?: throw IrobotCloud.CloudException("Нет сохранённого робота")
                 val raw = cloud.getPmaps(session, blid)
-                val cached = repository.loadCloudMaps(blid).associateBy { it.versionId }
+                val previous = repository.loadCloudMaps(blid)
+                val cached = previous.associateBy { it.versionId }
                 val merged = parseCloudMaps(raw).map { map ->
                     val old = cached[map.versionId]
                     if (old != null && old.hasGeometry) {
@@ -348,10 +432,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 _cloudMaps.value = merged
                 repository.saveCloudMaps(blid, merged)
-                _cloudMapStatus.value = if (merged.isEmpty()) {
-                    "Облако не вернуло карт. Ответ: ${raw.take(300)}"
+                if (merged.isEmpty()) {
+                    _cloudMapStatus.value = "Облако не вернуло карт. Ответ: ${raw.take(300)}"
+                } else if (previous.isEmpty()) {
+                    _cloudMapStatus.value = "Облако: ${merged.size} карт(ы). Выберите карту."
                 } else {
-                    "Облако: ${merged.size} карт(ы). Выберите карту."
+                    val known = cached.keys
+                    val fresh = merged.filter { it.versionId !in known }
+                    _cloudMapStatus.value = if (fresh.isEmpty()) {
+                        "Облако: ${merged.size} карт(ы). Новых версий нет."
+                    } else {
+                        val list = fresh.joinToString("; ") { "${it.name} (${it.created.ifBlank { "без даты" }})" }
+                        "Появилась новая версия карты: $list"
+                    }
                 }
             } catch (e: Exception) {
                 _cloudMapStatus.value = e.message ?: "Ошибка загрузки карт"
@@ -363,13 +456,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Show a map's cached geometry, or fetch it from the cloud if missing. */
     fun selectCloudMap(map: CloudMap) {
-        if (map.hasGeometry) {
+        // "Complete" means the UMF was parsed with the current code (walls,
+        // rooms, dock). Older caches only had coverage points, so re-fetch.
+        val complete = map.rawUmf.isNotBlank()
+        if (complete) {
             _selectedCloudMap.value = map
             _cloudMapStatus.value = geometryStatus(map)
             return
         }
+        if (map.hasGeometry) {
+            // Show what we have while/till the fresh data arrives.
+            _selectedCloudMap.value = map
+            _cloudMapStatus.value = "Показано из кэша. Подтягиваю стены, комнаты и базу…"
+        }
         val session = cloudSession
         if (session == null) {
+            if (map.hasGeometry) return
             _selectedCloudMap.value = null
             _cloudMapStatus.value =
                 "Геометрия не сохранена. Войдите и нажмите «Обновить», чтобы скачать."
@@ -378,12 +480,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val blid = currentBlid() ?: return
         _cloudMapBusy.value = true
         _cloudMapStatus.value = "Загрузка карты…"
-        _selectedCloudMap.value = null
         viewModelScope.launch {
             try {
                 val umf = cloud.getUmf(session, blid, map.pmapId, map.versionId)
-                val (points, polygons) = extractGeometry(umf)
-                val updated = map.copy(points = points, polygons = polygons)
+                val geo = parseUmf(umf)
+                val updated = map.copy(
+                    points = geo.points,
+                    polygons = geo.polygons,
+                    rooms = geo.rooms,
+                    walls = geo.walls,
+                    clutter = geo.clutter,
+                    dock = geo.dock,
+                    startPose = geo.startPose,
+                    rawUmf = umf.toString(),
+                )
                 _selectedCloudMap.value = updated
                 _cloudMapStatus.value = geometryStatus(updated)
                 val list = _cloudMaps.value.map {
@@ -399,8 +509,47 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun cleanRooms(regionIds: List<String>) {
-        if (regionIds.isEmpty()) {
+    /** Re-fetch UMF for the selected map (forces a cloud call, stores raw). */
+    fun reloadSelectedMap() {
+        val map = _selectedCloudMap.value ?: return
+        val session = cloudSession
+        if (session == null) {
+            _cloudMapStatus.value = "Нужен вход: нажмите «Обновить из облака» в списке карт"
+            return
+        }
+        val blid = currentBlid() ?: return
+        _cloudMapBusy.value = true
+        _cloudMapStatus.value = "Обновление карты…"
+        viewModelScope.launch {
+            try {
+                val umf = cloud.getUmf(session, blid, map.pmapId, map.versionId)
+                val geo = parseUmf(umf)
+                val updated = map.copy(
+                    points = geo.points,
+                    polygons = geo.polygons,
+                    rooms = geo.rooms,
+                    walls = geo.walls,
+                    clutter = geo.clutter,
+                    dock = geo.dock,
+                    startPose = geo.startPose,
+                    rawUmf = umf.toString(),
+                )
+                _selectedCloudMap.value = updated
+                val list = _cloudMaps.value.map {
+                    if (it.versionId == map.versionId) updated else it
+                }
+                _cloudMaps.value = list
+                repository.saveCloudMaps(blid, list)
+                _cloudMapStatus.value = "Обновлено. UMF: ${umf.toString().length} символов"
+            } catch (e: Exception) {
+                _cloudMapStatus.value = e.message ?: "Ошибка обновления карты"
+            } finally {
+                _cloudMapBusy.value = false
+            }
+        }
+    }
+
+    fun cleanRooms(regionIds: List<String>) {        if (regionIds.isEmpty()) {
             _cloudMapStatus.value = "Выберите хотя бы одну комнату"
             return
         }
@@ -414,6 +563,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val blid = currentBlid() ?: repository.selected.value?.blid
         val cached = blid?.let { repository.loadMissionHistory(it) } ?: emptyList()
         _history.value = cached
+        // Load the plan too, so mission maps can show walls/rooms/dock.
+        if (_cloudMaps.value.isEmpty()) {
+            _cloudMaps.value = blid?.let { repository.loadCloudMaps(it) } ?: emptyList()
+        }
         refreshMapLookup()
         _selectedMission.value = null
         _historyStatus.value = if (cached.isEmpty()) null else "Из кэша: ${cached.size} записей."
@@ -469,10 +622,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun selectMission(entry: MissionEntry) {
-        if (entry.hasGeometry) {
+        // Consider it complete only when both coverage points and the cleaned
+        // outline are present; older caches stored points only, so re-fetch.
+        if (entry.points.isNotEmpty() && entry.polygons.isNotEmpty()) {
             _selectedMission.value = entry
             _historyStatus.value = missionStatus(entry)
             return
+        }
+        if (entry.hasGeometry) {
+            _selectedMission.value = entry
+            _historyStatus.value = "Показано из кэша. Догружаю контур уборки…"
         }
         val session = cloudSession
         val pmapId = entry.pmapId
@@ -489,12 +648,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val blid = currentBlid() ?: return
         _cloudMapBusy.value = true
         _historyStatus.value = "Загрузка карты уборки…"
-        _selectedMission.value = null
         viewModelScope.launch {
             try {
                 val umf = cloud.getUmf(session, blid, pmapId, pmapvId)
-                val (points, polygons) = extractGeometry(umf)
-                val updated = entry.copy(points = points, polygons = polygons)
+                val geo = parseUmf(umf)
+                val updated = entry.copy(points = geo.points, polygons = geo.polygons)
                 _selectedMission.value = updated
                 _historyStatus.value = missionStatus(updated)
                 val list = _history.value.map {
@@ -659,24 +817,131 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }.getOrElse { raw }
     }
 
-    /** (coverage points, coverage polygons) in millimetres from a UMF response. */
-    private fun extractGeometry(
-        umf: org.json.JSONObject,
-    ): Pair<List<Pair<Float, Float>>, List<List<Pair<Float, Float>>>> {
+    /** Full geometry parsed from a UMF response (all coordinates in millimetres). */
+    private data class UmfGeometry(
+        val points: List<Pair<Float, Float>>,
+        val polygons: List<List<Pair<Float, Float>>>,
+        val rooms: List<CloudRoom>,
+        val walls: List<List<Pair<Float, Float>>>,
+        val clutter: List<List<Pair<Float, Float>>>,
+        val dock: Pair<Float, Float>?,
+        val startPose: Pair<Float, Float>?,
+    )
+
+    private fun parseUmf(umf: org.json.JSONObject): UmfGeometry {
         var points: List<Pair<Float, Float>> = emptyList()
         var polygons: List<List<Pair<Float, Float>>> = emptyList()
-        val map0 = umf.optJSONArray("maps")?.optJSONObject(0) ?: return points to polygons
-        val layers = map0.optJSONArray("layers") ?: return points to polygons
-        for (i in 0 until layers.length()) {
-            val layer = layers.optJSONObject(i) ?: continue
-            val coordinates = layer.optJSONObject("geometry")?.optJSONArray("coordinates")
-                ?: continue
-            when (layer.optString("layer_type")) {
-                "coverage" -> points = parsePointArray(coordinates)
-                "coverage_poly" -> polygons = parseRings(coordinates)
+        val rooms = ArrayList<CloudRoom>()
+        val walls = ArrayList<List<Pair<Float, Float>>>()
+        var clutter: List<List<Pair<Float, Float>>> = emptyList()
+        var dock: Pair<Float, Float>? = null
+        var start: Pair<Float, Float>? = null
+
+        val maps = umf.optJSONArray("maps")
+        if (maps != null) for (mi in 0 until maps.length()) {
+            val map = maps.optJSONObject(mi) ?: continue
+
+            val point2d = HashMap<String, Pair<Float, Float>>()
+            map.optJSONArray("points2d")?.let { array ->
+                for (i in 0 until array.length()) {
+                    val obj = array.optJSONObject(i) ?: continue
+                    val id = obj.optString("id")
+                    val coord = obj.optJSONArray("coordinates") ?: continue
+                    if (id.isNotBlank() && coord.length() >= 2) {
+                        point2d[id] = (coord.optDouble(0) * 1000.0).toFloat() to
+                            (coord.optDouble(1) * 1000.0).toFloat()
+                    }
+                }
+            }
+
+            val poses = HashMap<String, Pair<Float, Float>>()
+            map.optJSONArray("poses2d")?.let { array ->
+                for (i in 0 until array.length()) {
+                    val obj = array.optJSONObject(i) ?: continue
+                    val id = obj.optString("id")
+                    val coord = obj.optJSONArray("coordinates") ?: continue
+                    if (id.isNotBlank() && coord.length() >= 2) {
+                        poses[id] = (coord.optDouble(0) * 1000.0).toFloat() to
+                            (coord.optDouble(1) * 1000.0).toFloat()
+                    }
+                }
+            }
+
+            val suggested = HashMap<String, String>()
+            map.optJSONArray("region_suggestions")?.let { array ->
+                for (i in 0 until array.length()) {
+                    val obj = array.optJSONObject(i) ?: continue
+                    val rid = obj.optString("region_id")
+                    val top = obj.optJSONArray("suggested_types")
+                        ?.optJSONObject(0)?.optString("region_type")
+                    if (rid.isNotBlank() && !top.isNullOrBlank()) suggested[rid] = top
+                }
+            }
+
+            map.optJSONArray("regions")?.let { array ->
+                for (i in 0 until array.length()) {
+                    val region = array.optJSONObject(i) ?: continue
+                    val rid = region.optString("id")
+                    val ring = resolveRing(region.optJSONObject("geometry")?.optJSONArray("ids"), point2d)
+                    if (rid.isNotBlank() && ring.size >= 3) {
+                        rooms.add(CloudRoom(rid, ring, suggested[rid]))
+                    }
+                }
+            }
+
+            map.optJSONArray("borders")?.let { array ->
+                for (i in 0 until array.length()) {
+                    val border = array.optJSONObject(i) ?: continue
+                    val ring = resolveRing(border.optJSONObject("geometry")?.optJSONArray("ids"), point2d)
+                    if (ring.size >= 3) walls.add(ring)
+                }
+            }
+
+            val typed = map.optJSONObject("typed_poses")
+            dock = posFromIds(typed?.optJSONObject("dock_poses"), poses) ?: dock
+            start = posFromIds(typed?.optJSONObject("start_pose"), poses) ?: start
+
+            map.optJSONArray("layers")?.let { layers ->
+                for (i in 0 until layers.length()) {
+                    val layer = layers.optJSONObject(i) ?: continue
+                    val coordinates = layer.optJSONObject("geometry")?.optJSONArray("coordinates")
+                        ?: continue
+                    when (layer.optString("layer_type")) {
+                        "coverage" -> points = parsePointArray(coordinates)
+                        "coverage_poly" -> polygons = parseRings(coordinates)
+                        "clutter" -> clutter = parseRings(coordinates)
+                    }
+                }
             }
         }
-        return points to polygons
+        return UmfGeometry(points, polygons, rooms, walls, clutter, dock, start)
+    }
+
+    /** Resolve a ring given as lists of point ids against the points2d table. */
+    private fun resolveRing(
+        rings: JSONArray?,
+        point2d: Map<String, Pair<Float, Float>>,
+    ): List<Pair<Float, Float>> {
+        if (rings == null) return emptyList()
+        var best: List<Pair<Float, Float>> = emptyList()
+        for (i in 0 until rings.length()) {
+            val ring = rings.optJSONArray(i) ?: continue
+            val pts = ArrayList<Pair<Float, Float>>(ring.length())
+            for (j in 0 until ring.length()) {
+                point2d[ring.optString(j)]?.let { pts.add(it) }
+            }
+            if (pts.size > best.size) best = pts
+        }
+        return best
+    }
+
+    private fun posFromIds(
+        obj: org.json.JSONObject?,
+        poses: Map<String, Pair<Float, Float>>,
+    ): Pair<Float, Float>? {
+        val ids = obj?.optJSONObject("geometry")?.optJSONArray("ids") ?: return null
+        if (ids.length() == 0) return null
+        return poses[ids.optString(0)]
     }
 
     private fun parsePointArray(coords: JSONArray): List<Pair<Float, Float>> {
@@ -692,7 +957,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return out
     }
 
-    /** `coordinates` may be a single ring or a list of rings. */
+    /** `coordinates` may be a ring, a list of rings, or a multipolygon. */
     private fun parseRings(coords: JSONArray): List<List<Pair<Float, Float>>> {
         val out = ArrayList<List<Pair<Float, Float>>>()
         for (i in 0 until coords.length()) {
