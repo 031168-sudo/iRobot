@@ -42,3 +42,15 @@
 **Коммит/пуш — только по явной команде пользователя.**
 Слово **«коммить/закоммить»** означает: закоммитить все изменения и **запушить**
 их в GitHub. Без такой команды ничего не коммитить и не пушить.
+
+## Сборка и CI
+- Локально: `./gradlew :app:assembleDebug` → `app/build/outputs/apk/debug/app-debug.apk`.
+- Публикация APK: скопировать собранный файл в `/home/gmpony/public/apk/braavalocal-debug.apk`
+  (раздаётся как `https://gmpony.alfanomy.ru/apk/braavalocal-debug.apk`).
+- Подпись: общий debug-ключ **в репозитории** `keystore/debug.keystore`
+  (`alias=androiddebugkey`, пароли `android`) — чтобы CI и локальные сборки
+  совпадали и обновления ставились поверх старой версии. Ключ намеренно
+  публичный (приложение некоммерческое).
+- CI: GitHub Actions `.github/workflows/android.yml` собирает debug APK на push
+  в `master` и выкладывает артефакт `braavalocal-debug-apk`.
+- В git **не хранятся**: `local.properties`, `*.apk`, `*.aab` (см. `.gitignore`).

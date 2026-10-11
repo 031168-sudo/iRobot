@@ -16,8 +16,24 @@ android {
         versionName = "2.3"
     }
 
+    signingConfigs {
+        // Shared (non-secret) debug key, committed on purpose so every build
+        // here, locally and in CI, is signed identically and updates install
+        // over the previously published APK.
+        create("shared") {
+            storeFile = rootProject.file("keystore/debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
+        getByName("debug") {
+            signingConfig = signingConfigs.getByName("shared")
+        }
         release {
+            signingConfig = signingConfigs.getByName("shared")
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
