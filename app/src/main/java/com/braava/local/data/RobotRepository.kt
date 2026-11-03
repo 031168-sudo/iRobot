@@ -194,6 +194,9 @@ class RobotRepository(context: Context) {
     suspend fun discover(timeoutMs: Long = 6000): List<RobotDiscovery.Found> =
         RobotDiscovery.discover(appContext, timeoutMs)
 
+    /** TCP sweep of the local /24 on the robot's MQTT port (broadcast fallback). */
+    suspend fun scanLocalNetwork(): List<String> = RobotDiscovery.scanSubnet(appContext)
+
     /** Start a mission scoped to the given cloud room ids. */
     fun startRooms(regionIds: List<String>) {
         if (regionIds.isEmpty()) return
@@ -321,7 +324,22 @@ class RobotRepository(context: Context) {
         logEvent("↻ ищу робота в сети (IP мог измениться)")
         val found = runCatching { RobotDiscovery.discover(appContext) }.getOrDefault(emptyList())
         val config = _selected.value
-        val match = found.firstOrNull { config != null && it.blid == config.blid }
+        var match = found.firstOrNull { config != null && it.blid == config.blid }
+        if (match == null && config != null) {
+            // Broadcast may be filtered by the AP. Sweep the LAN for hosts with
+            // the robot's MQTT port open and confirm each one via unicast
+            // discovery, so a DHCP address change is recovered automatically.
+            val candidates = runCatching { RobotDiscovery.scanSubnet(appContext) }
+                .getOrDefault(emptyList())
+                .filter { it != config.ip }
+            for (candidate in candidates) {
+                val probe = runCatching { RobotDiscovery.probe(appContext, candidate) }.getOrNull()
+                if (probe != null && probe.blid == config.blid) {
+                    match = probe
+                    break
+                }
+            }
+        }
         when {
             config == null -> {
                 connecting = false

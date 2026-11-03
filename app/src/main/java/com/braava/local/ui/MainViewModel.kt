@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.braava.local.BraavaApp
+import com.braava.local.data.CloudCredentialStore
 import com.braava.local.data.ConnectionDiagnostics
 import com.braava.local.data.RobotConfig
 import com.braava.local.data.cloud.IrobotCloud
@@ -13,6 +14,7 @@ import com.braava.local.data.model.CloudMap
 import com.braava.local.data.model.CloudRegion
 import com.braava.local.data.model.CloudRoom
 import com.braava.local.data.model.MissionEntry
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
@@ -21,6 +23,7 @@ import org.json.JSONArray
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val repository = (application as BraavaApp).repository
+    private val credentialStore = CloudCredentialStore(application.applicationContext)
 
     val robots = repository.robots
     val config = repository.selected
@@ -187,6 +190,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     // ----- cloud -----
 
+    /** Saved iRobot account credentials, or null when the user has not opted in. */
+    fun savedCloudCredentials(): CloudCredentialStore.Credentials? = credentialStore.load()
+
+    /** Forget the saved iRobot account; cached maps stay available. */
+    fun forgetCloudCredentials() {
+        credentialStore.clear()
+        cloudSession = null
+        _loggedIn.value = false
+    }
+
     fun cloudLogin(username: String, password: String) {
         if (username.isBlank() || password.isBlank()) {
             _error.value = "Введите логин и пароль iRobot"
@@ -196,6 +209,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             try {
                 val robots = IrobotCloud().fetchRobots(username.trim(), password)
+                credentialStore.save(username.trim(), password)
                 _cloudRobots.value = robots
                 if (robots.isEmpty()) _error.value = "В аккаунте не найдено роботов"
             } catch (e: Exception) {
@@ -231,8 +245,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _busy.value = true
         viewModelScope.launch {
             try {
-                _discovered.value = repository.discover()
-                if (_discovered.value.isEmpty()) {
+                // UDP broadcast and a TCP sweep run in parallel: broadcast is
+                // often filtered, while the robot always listens on 8883.
+                val broadcast = async { repository.discover() }
+                val scanned = async { repository.scanLocalNetwork() }
+                val found = broadcast.await().toMutableList()
+                val known = found.map { it.ip }.toSet()
+                scanned.await().filterNot { it in known }.forEach { ip ->
+                    found += RobotDiscovery.Found(
+                        ip = ip,
+                        hostname = "порт 8883 открыт",
+                        blid = "",
+                        mac = null,
+                        sku = null,
+                        robotName = null,
+                    )
+                }
+                _discovered.value = found
+                if (found.isEmpty()) {
                     _error.value = "Робот не найден в локальной сети"
                 }
             } catch (e: Exception) {
@@ -415,6 +445,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             try {
                 val session = cloud.login(username.trim(), password)
+                credentialStore.save(username.trim(), password)
                 cloudSession = session
                 _loggedIn.value = true
                 val blid = currentBlid()
@@ -592,6 +623,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             try {
                 val session = cloud.login(username.trim(), password)
+                credentialStore.save(username.trim(), password)
                 cloudSession = session
                 _loggedIn.value = true
                 val blid = currentBlid()

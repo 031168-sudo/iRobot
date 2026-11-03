@@ -71,10 +71,12 @@ private fun formatEpoch(epoch: Long?): String {
 private fun LoginForm(
     busy: Boolean,
     submitLabel: String,
+    initialUsername: String = "",
+    initialPassword: String = "",
     onSubmit: (String, String) -> Unit,
 ) {
-    var username by remember { mutableStateOf("") }
-    var password by remember { mutableStateOf("") }
+    var username by remember { mutableStateOf(initialUsername) }
+    var password by remember { mutableStateOf(initialPassword) }
     OutlinedTextField(
         value = username,
         onValueChange = { username = it },
@@ -98,6 +100,12 @@ private fun LoginForm(
             autoCorrectEnabled = false,
         ),
         modifier = Modifier.fillMaxWidth(),
+    )
+    Spacer(Modifier.height(4.dp))
+    Text(
+        "Логин и пароль сохраняются на устройстве.",
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
     Spacer(Modifier.height(12.dp))
     Button(
@@ -405,6 +413,7 @@ fun MapsDialogs(viewModel: MainViewModel, onClose: () -> Unit) {
     viewModel.history.collectAsStateWithLifecycle()
 
     var showLogin by remember { mutableStateOf(maps.isEmpty()) }
+    val savedCredentials = remember(showLogin) { viewModel.savedCloudCredentials() }
     var selectedRooms by remember(selected?.versionId) { mutableStateOf(emptySet<String>()) }
     var renameMapTarget by remember { mutableStateOf<CloudMap?>(null) }
     var renameRoomTarget by remember { mutableStateOf<Pair<CloudMap, String>?>(null) }
@@ -426,6 +435,8 @@ fun MapsDialogs(viewModel: MainViewModel, onClose: () -> Unit) {
                     LoginForm(
                         busy = busy,
                         submitLabel = if (maps.isEmpty()) "Загрузить карты" else "Обновить",
+                        initialUsername = savedCredentials?.username.orEmpty(),
+                        initialPassword = savedCredentials?.password.orEmpty(),
                         onSubmit = { u, p -> viewModel.refreshCloudMaps(u, p); showLogin = false },
                     )
                 }
@@ -657,6 +668,7 @@ fun HistoryDialogs(viewModel: MainViewModel, onClose: () -> Unit) {
     viewModel.roomNames.collectAsStateWithLifecycle()
 
     var showLogin by remember { mutableStateOf(entries.isEmpty()) }
+    val savedCredentials = remember(showLogin) { viewModel.savedCloudCredentials() }
 
     AlertDialog(
         onDismissRequest = onClose,
@@ -675,6 +687,8 @@ fun HistoryDialogs(viewModel: MainViewModel, onClose: () -> Unit) {
                     LoginForm(
                         busy = busy,
                         submitLabel = if (entries.isEmpty()) "Загрузить историю" else "Обновить",
+                        initialUsername = savedCredentials?.username.orEmpty(),
+                        initialPassword = savedCredentials?.password.orEmpty(),
                         onSubmit = { u, p -> viewModel.refreshHistory(u, p); showLogin = false },
                     )
                 }

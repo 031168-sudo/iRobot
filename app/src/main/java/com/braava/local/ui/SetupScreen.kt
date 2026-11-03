@@ -200,8 +200,9 @@ private fun CloudSetup(viewModel: MainViewModel, onAdded: () -> Unit) {
     val robots by viewModel.cloudRobots.collectAsStateWithLifecycle()
     val discovered by viewModel.discovered.collectAsStateWithLifecycle()
 
-    var username by remember { mutableStateOf("") }
-    var password by remember { mutableStateOf("") }
+    val savedCredentials = remember { viewModel.savedCloudCredentials() }
+    var username by remember { mutableStateOf(savedCredentials?.username.orEmpty()) }
+    var password by remember { mutableStateOf(savedCredentials?.password.orEmpty()) }
     var ip by remember { mutableStateOf("") }
     var selected by remember { mutableStateOf<IrobotCloud.CloudRobot?>(null) }
 
@@ -209,7 +210,8 @@ private fun CloudSetup(viewModel: MainViewModel, onAdded: () -> Unit) {
     Spacer(Modifier.height(8.dp))
     Text(
         "Логин и пароль нужны один раз, чтобы получить локальный пароль робота. " +
-            "После этого приложение работает только по Wi-Fi.",
+            "После этого приложение работает только по Wi-Fi. " +
+            "Данные входа сохраняются на устройстве в зашифрованном виде.",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
@@ -481,7 +483,11 @@ fun DiscoveredList(
                         style = MaterialTheme.typography.titleSmall,
                     )
                     Text(
-                        "IP: ${device.ip}  •  BLID: ${device.blid}",
+                        if (device.blid.isBlank()) {
+                            "IP: ${device.ip}  •  найден сканированием"
+                        } else {
+                            "IP: ${device.ip}  •  BLID: ${device.blid}"
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

@@ -149,6 +149,11 @@ fun ControlScreen(
                     }
                     DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                         DropdownMenuItem(
+                            text = { Text("Мой Робот ${appVersion(context)}") },
+                            onClick = {},
+                            enabled = false,
+                        )
+                        DropdownMenuItem(
                             text = { Text("Карта из облака") },
                             onClick = {
                                 menuOpen = false
@@ -204,6 +209,13 @@ fun ControlScreen(
                             onClick = {
                                 menuOpen = false
                                 viewModel.forget()
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Забыть пароль iRobot") },
+                            onClick = {
+                                menuOpen = false
+                                viewModel.forgetCloudCredentials()
                             },
                         )
                     }
@@ -1005,6 +1017,10 @@ private fun telemetryText(state: RobotState?): String {
         append(state.raw)
     }
 }
+
+private fun appVersion(context: Context): String = runCatching {
+    context.packageManager.getPackageInfo(context.packageName, 0).versionName
+}.getOrNull().orEmpty()
 
 private fun statusLabel(status: ConnectionStatus): String = when (status) {
     ConnectionStatus.Connected -> "Подключено по Wi-Fi"
