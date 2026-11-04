@@ -41,6 +41,7 @@ class CloudMapStore(context: Context) {
         val pmapId = obj.optString("pmapId")
         val versionId = obj.optString("versionId")
         if (pmapId.isBlank() || versionId.isBlank()) return null
+        val userVersionId = obj.optString("userVersionId").takeIf { it.isNotBlank() }
         val regions = obj.optJSONArray("regions")?.let { array ->
             (0 until array.length()).mapNotNull { i ->
                 array.optJSONObject(i)?.let {
@@ -51,6 +52,7 @@ class CloudMapStore(context: Context) {
         return CloudMap(
             pmapId = pmapId,
             versionId = versionId,
+            userVersionId = userVersionId,
             name = obj.optString("name").ifBlank { obj.optString("label") },
             created = obj.optString("created"),
             regions = regions,
@@ -68,6 +70,7 @@ class CloudMapStore(context: Context) {
     private fun writeMap(map: CloudMap): JSONObject = JSONObject().apply {
         put("pmapId", map.pmapId)
         put("versionId", map.versionId)
+        put("userVersionId", map.userVersionId)
         put("name", map.name)
         put("created", map.created)
         put("rawUmf", map.rawUmf)

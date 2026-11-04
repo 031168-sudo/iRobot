@@ -16,6 +16,8 @@ data class CloudRoom(
 data class CloudMap(
     val pmapId: String,
     val versionId: String,
+    /** Committed user version (`user_pmapv_id`), safer for room commands. */
+    val userVersionId: String? = null,
     val name: String,
     val created: String,
     val regions: List<CloudRegion> = emptyList(),

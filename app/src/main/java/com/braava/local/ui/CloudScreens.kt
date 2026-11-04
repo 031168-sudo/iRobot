@@ -600,7 +600,7 @@ private fun MapDetailDialog(
 
                 Spacer(Modifier.height(12.dp))
                 Button(
-                    onClick = { viewModel.cleanRooms(selectedRooms.toList()) },
+                    onClick = { viewModel.cleanRooms(map, selectedRooms.toList()) },
                     enabled = selectedRooms.isNotEmpty(),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
@@ -613,7 +613,7 @@ private fun MapDetailDialog(
                     )
                 }
                 TextButton(
-                    onClick = { viewModel.command("start") },
+                    onClick = { viewModel.cleanRooms(map, emptyList()) },
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text("Убрать всё")

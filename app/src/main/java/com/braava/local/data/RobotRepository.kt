@@ -197,14 +197,65 @@ class RobotRepository(context: Context) {
     /** TCP sweep of the local /24 on the robot's MQTT port (broadcast fallback). */
     suspend fun scanLocalNetwork(): List<String> = RobotDiscovery.scanSubnet(appContext)
 
+    /** Map id -> the version currently stored on the robot (`reported.pmaps`). */
+    fun localMapVersions(): Map<String, String> {
+        val reported = master.optJSONObject("state")?.optJSONObject("reported")
+            ?: return emptyMap()
+        val pmaps = reported.optJSONArray("pmaps") ?: return emptyMap()
+        val result = LinkedHashMap<String, String>()
+        for (i in 0 until pmaps.length()) {
+            val obj = pmaps.optJSONObject(i) ?: continue
+            val keys = obj.keys()
+            while (keys.hasNext()) {
+                val key = keys.next()
+                val value = obj.optString(key)
+                if (key.isNotBlank() && value.isNotBlank()) result[key] = value
+            }
+        }
+        return result
+    }
+
     /** Start a mission scoped to the given cloud room ids. */
     fun startRooms(regionIds: List<String>) {
-        if (regionIds.isEmpty()) return
+        if (regionIds.isEmpty()) {
+            sendCommand("start")
+            return
+        }
         val regions = org.json.JSONArray()
         regionIds.forEach { id ->
             regions.put(JSONObject().put("region_id", id).put("type", "rid"))
         }
         sendCommand("start", JSONObject().put("regions", regions))
+    }
+
+    /**
+     * Start a mission pinned to a known map version, like the native app's
+     * favourite: explicit [pmapId] + [versionId], optional rooms and the
+     * current cleaning settings. This avoids the robot picking an unrelated
+     * or uncommitted map version on its own.
+     */
+    fun startMap(
+        pmapId: String,
+        versionId: String,
+        regionIds: List<String> = emptyList(),
+        settings: JSONObject = JSONObject(),
+    ) {
+        if (pmapId.isBlank() || versionId.isBlank()) {
+            startRooms(regionIds)
+            return
+        }
+        val params = JSONObject()
+            .put("pmap_id", pmapId)
+            .put("user_pmapv_id", versionId)
+        if (regionIds.isNotEmpty()) {
+            val regions = org.json.JSONArray()
+            regionIds.forEach { id ->
+                regions.put(JSONObject().put("region_id", id).put("type", "rid"))
+            }
+            params.put("regions", regions)
+        }
+        for (key in settings.keys()) params.put(key, settings.get(key))
+        sendCommand("start", params)
     }
 
 

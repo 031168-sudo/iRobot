@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import org.json.JSONArray
+import org.json.JSONObject
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -580,12 +581,43 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun cleanRooms(regionIds: List<String>) {        if (regionIds.isEmpty()) {
-            _cloudMapStatus.value = "Выберите хотя бы одну комнату"
+    fun cleanRooms(map: CloudMap, regionIds: List<String>) {
+        val localVersion = repository.localMapVersions()[map.pmapId]
+        val version = map.userVersionId?.takeIf { it.isNotBlank() }
+            ?: localVersion?.takeIf { it.isNotBlank() }
+            ?: map.versionId.takeIf { it.isNotBlank() }
+        if (version.isNullOrBlank()) {
+            repository.startRooms(regionIds)
+            _cloudMapStatus.value = "Версия карты не найдена — робот возьмёт текущую"
             return
         }
-        repository.startRooms(regionIds)
-        _cloudMapStatus.value = "Отправлена уборка по комнатам: ${regionIds.size}"
+        val source = when {
+            map.userVersionId == version -> "пользовательская"
+            localVersion == version -> "локальная"
+            else -> "активная"
+        }
+        repository.startMap(
+            pmapId = map.pmapId,
+            versionId = version,
+            regionIds = regionIds,
+            settings = currentCleanSettings(),
+        )
+        val what = if (regionIds.isEmpty()) "вся карта" else "комнат: ${regionIds.size}"
+        _cloudMapStatus.value =
+            "Отправлено: $what, «${mapTitle(map)}», версия $version ($source)"
+    }
+
+    /** Snapshot of the robot's current cleaning settings for a map-pinned start. */
+    private fun currentCleanSettings(): JSONObject {
+        val state = repository.state.value ?: return JSONObject()
+        return JSONObject().apply {
+            state.noAutoPasses?.let { put("noAutoPasses", it) }
+            state.twoPass?.let { put("twoPass", it) }
+            state.padWetness?.let {
+                put("padWetness", JSONObject().put("reusable", it).put("disposable", it))
+            }
+            state.rankOverlap?.let { put("rankOverlap", it) }
+        }
     }
 
     // ----- mission history -----
@@ -807,6 +839,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 .ifBlank { obj.optString("pmapv_id") }
             if (pmapId.isBlank() || versionId.isBlank()) return@mapNotNull null
             val details = obj.optJSONObject("active_pmapv_details")
+            val userVersionId = obj.optString("user_pmapv_id")
+                .ifBlank { details?.optString("last_user_pmapv_id").orEmpty() }
+                .ifBlank { details?.optString("user_pmapv_id").orEmpty() }
+                .takeIf { it.isNotBlank() }
             val name = obj.optString("name").ifBlank {
                 details?.optString("name").orEmpty()
             }.ifBlank { "Карта ${index + 1}" }
@@ -815,6 +851,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             CloudMap(
                 pmapId = pmapId,
                 versionId = versionId,
+                userVersionId = userVersionId,
                 name = name,
                 created = formatMapTime(created),
                 regions = parseRegions(details),
