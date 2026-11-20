@@ -80,7 +80,14 @@ minSdk 26, target/compileSdk 35.
 4. `./gradlew :app:assembleDebug`;
 5. артефакт **`braavalocal-debug-apk`** с файлом `app-debug.apk`.
 
-Скачать APK:
+Постоянная ссылка — GitHub Release (workflow **Release APK**
+`.github/workflows/release.yml`, запуск на тег `v*` или вручную):
+
+- `https://github.com/031168-sudo/iRobot/releases/download/v2.7/MyRobot-2.7.apk`
+- тег создаётся под версию из `app/build.gradle.kts` (`v2.7` и т.д.);
+- рядом с релизом можно скачать `app-debug.apk` из артефактов run.
+
+Скачать APK из CI:
 
 - GitHub → **Actions** → последний run → **Artifacts** →
   `braavalocal-debug-apk`;
@@ -90,8 +97,7 @@ minSdk 26, target/compileSdk 35.
 `.gradle/` и `app/build/` в git нет — они не нужны: CI сам находит SDK.
 
 Старая локальная публикация APK на прежнем сервере — только историческая;
-на новом сервере её нет. Если нужен постоянный APK вне артефактов CI, можно
-отдельно сделать GitHub Release — сейчас это не настроено.
+на новом сервере её нет.
 
 ## Что не лежит в GitHub (и не должно)
 

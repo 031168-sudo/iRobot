@@ -66,6 +66,9 @@ Android SDK. На сервере без SDK она не требуется: ка
 
 - **Каноническая сборка:** GitHub Actions `.github/workflows/android.yml`
   на push в `master` и по `workflow_dispatch`.
+- **Релиз с постоянной ссылкой:** `.github/workflows/release.yml` на тег `v*`
+  (или ручной запуск) собирает тот же debug APK и прикрепляет его к GitHub
+  Release: `https://github.com/031168-sudo/iRobot/releases/download/v2.7/MyRobot-2.7.apk`.
 - CI ставит JDK 17, использует предустановленный Android SDK на `ubuntu-latest`,
   выполняет `./gradlew :app:assembleDebug` и выкладывает артефакт
   **`braavalocal-debug-apk`**.
