@@ -77,11 +77,14 @@ object PermissiveTls {
                 }
             }
             runCatching {
-                // RSA key exchange only. The robot also offers weak DHE
-                // groups that Android rejects ("DH key too small"), and
-                // letting it pick one breaks the handshake.
+                // ECDHE first: the m6 accepts ECDHE-RSA-AES128-GCM-SHA256,
+                // and this is the key exchange modern Android still enables
+                // by default. Static-RSA suites stay at the end as a fallback
+                // for older robots. The robot also offers weak DHE groups
+                // that Android rejects ("DH key too small"), so DHE is
+                // deliberately excluded.
                 val supported = socket.supportedCipherSuites.toSet()
-                val chosen = RSA_CIPHERS.filter { it in supported }
+                val chosen = PREFERRED_CIPHERS.filter { it in supported }
                 if (chosen.isNotEmpty()) {
                     socket.enabledCipherSuites = chosen.toTypedArray()
                 }
@@ -90,7 +93,13 @@ object PermissiveTls {
         return socket
     }
 
-    private val RSA_CIPHERS = listOf(
+    /** Ordered by preference: ECDHE first, static RSA as a fallback. */
+    private val PREFERRED_CIPHERS = listOf(
+        "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
+        "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384",
+        "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256",
+        "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA",
+        "TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA",
         "TLS_RSA_WITH_AES_128_GCM_SHA256",
         "TLS_RSA_WITH_AES_256_GCM_SHA384",
         "TLS_RSA_WITH_AES_128_CBC_SHA256",

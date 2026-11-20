@@ -84,6 +84,7 @@ fun ControlScreen(
     onOpenManager: () -> Unit = {},
 ) {
     val status by viewModel.status.collectAsStateWithLifecycle()
+    val lastError by viewModel.lastError.collectAsStateWithLifecycle()
     val state by viewModel.state.collectAsStateWithLifecycle()
     val diagnostics by viewModel.diagnostics.collectAsStateWithLifecycle()
     val events by viewModel.events.collectAsStateWithLifecycle()
@@ -95,6 +96,8 @@ fun ControlScreen(
     var cloudMapOpen by remember { mutableStateOf(false) }
     var historyOpen by remember { mutableStateOf(false) }
     var editRobotOpen by remember { mutableStateOf(false) }
+    var ipDialogOpen by remember { mutableStateOf(false) }
+    var ipDraft by remember { mutableStateOf("") }
 
     val diagnosticsExport by viewModel.diagnosticsExport.collectAsStateWithLifecycle()
     val context = LocalContext.current
@@ -205,6 +208,14 @@ fun ControlScreen(
                             },
                         )
                         DropdownMenuItem(
+                            text = { Text("Подключиться к IP…") },
+                            onClick = {
+                                menuOpen = false
+                                ipDraft = config.ip
+                                ipDialogOpen = true
+                            },
+                        )
+                        DropdownMenuItem(
                             text = { Text("Забыть робота") },
                             onClick = {
                                 menuOpen = false
@@ -236,6 +247,15 @@ fun ControlScreen(
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                if (status is ConnectionStatus.Connecting) {
+                    lastError?.let { hint ->
+                        Text(
+                            hint,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
                 Spacer(Modifier.height(8.dp))
             }
             if (status is ConnectionStatus.Error) {
@@ -348,6 +368,46 @@ fun ControlScreen(
             },
             title = { Text("Здоровье") },
             text = { HealthContent(state?.health) },
+        )
+    }
+
+    if (ipDialogOpen) {
+        AlertDialog(
+            onDismissRequest = { ipDialogOpen = false },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val ip = ipDraft.trim()
+                        if (ip.isNotBlank() && ip != config.ip) {
+                            viewModel.updateRobot(config.copy(ip = ip))
+                        }
+                        ipDialogOpen = false
+                    },
+                ) { Text("Подключиться") }
+            },
+            dismissButton = {
+                TextButton(onClick = { ipDialogOpen = false }) { Text("Отмена") }
+            },
+            title = { Text("Адрес робота") },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = ipDraft,
+                        onValueChange = { ipDraft = it },
+                        label = { Text("IP-адрес") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Нужно, если робот сменил адрес и автопоиск не сработал. " +
+                            "Телефон и робот должны быть в одной подсети.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            },
         )
     }
 

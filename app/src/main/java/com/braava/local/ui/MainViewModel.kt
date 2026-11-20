@@ -29,6 +29,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val robots = repository.robots
     val config = repository.selected
     val status = repository.status
+    val lastError = repository.lastError
     val state = repository.state
     val events = repository.events
     val trail = repository.trail

@@ -70,7 +70,6 @@ class RobotRepository(context: Context) {
     private var retryJob: Job? = null
     private var attempt = 0
     private var connecting = false
-    private var rediscoverDone = false
 
     init {
         val saved = store.loadRobots()
@@ -131,7 +130,6 @@ class RobotRepository(context: Context) {
     fun connect() {
         if (client != null || connecting) return
         if (_selected.value == null) return
-        rediscoverDone = false
         connecting = true
         attempt = 0
         master = JSONObject()
@@ -338,28 +336,25 @@ class RobotRepository(context: Context) {
             val failed = client
             client = null
             scope.launch { runCatching { failed?.disconnect() } }
+            val detail = describe(error)
             val message = connectErrorMessage(error)
             _lastError.value = message
             attempt++
-            logEvent("✗ попытка $attempt: $message")
-            if (connecting && attempt <= MAX_CONNECT_ATTEMPTS) {
-                // The robot accepts a single local session and can briefly
-                // refuse while an old one is still closing, so retry with
-                // backoff instead of giving up on the first refusal.
-                _status.value = ConnectionStatus.Connecting
-                retryJob = scope.launch {
-                    delay(backoffMillis(attempt))
-                    if (connecting) startConnect()
-                }
-            } else if (connecting && !rediscoverDone) {
-                // The saved IP may be stale (DHCP changed it). Look the robot
-                // up on the LAN by its unique BLID and reconnect to the new IP.
-                rediscoverDone = true
-                retryJob = scope.launch { rediscoverAndReconnect() }
-            } else {
+            logEvent("✗ попытка $attempt: $detail")
+            if (!connecting) return
+            if (isAuthFailure(error)) {
+                // Wrong local password: retrying forever cannot help. Ask the
+                // user to refresh it from the cloud or from the robot itself.
                 connecting = false
                 _status.value = ConnectionStatus.Error(message)
+                return
             }
+            // The robot drops off Wi-Fi for short periods and accepts only one
+            // local session, so a failed attempt is not final: keep retrying
+            // until the user disconnects. Attempts are spaced by backoff and
+            // every few of them re-run discovery in case DHCP moved the robot.
+            _status.value = ConnectionStatus.Connecting
+            scheduleRetry()
         }
 
         override fun onMessage(topic: String, payload: String) {
@@ -368,15 +363,33 @@ class RobotRepository(context: Context) {
     }
 
     private fun backoffMillis(attempt: Int): Long =
-        (1500L * attempt).coerceIn(1500L, 10_000L)
+        (1500L * attempt).coerceIn(1500L, MAX_BACKOFF_MS)
+
+    /** Waits, then either retries the saved IP or re-runs discovery. */
+    private fun scheduleRetry() {
+        retryJob?.cancel()
+        val rediscover = attempt == REDISCOVER_ON_ATTEMPT ||
+            (attempt > REDISCOVER_ON_ATTEMPT && attempt % REDISCOVER_EVERY == 0)
+        retryJob = scope.launch {
+            delay(backoffMillis(attempt))
+            if (!connecting) return@launch
+            if (rediscover) rediscoverAndReconnect() else startConnect()
+        }
+    }
 
     private suspend fun rediscoverAndReconnect() {
+        if (!connecting) return
         _status.value = ConnectionStatus.Connecting
         logEvent("↻ ищу робота в сети (IP мог измениться)")
-        val found = runCatching { RobotDiscovery.discover(appContext) }.getOrDefault(emptyList())
         val config = _selected.value
-        var match = found.firstOrNull { config != null && it.blid == config.blid }
-        if (match == null && config != null) {
+        if (config == null) {
+            connecting = false
+            _status.value = ConnectionStatus.Error("Робот не выбран")
+            return
+        }
+        val found = runCatching { RobotDiscovery.discover(appContext) }.getOrDefault(emptyList())
+        var match = found.firstOrNull { it.blid == config.blid }
+        if (match == null) {
             // Broadcast may be filtered by the AP. Sweep the LAN for hosts with
             // the robot's MQTT port open and confirm each one via unicast
             // discovery, so a DHCP address change is recovered automatically.
@@ -384,6 +397,7 @@ class RobotRepository(context: Context) {
                 .getOrDefault(emptyList())
                 .filter { it != config.ip }
             for (candidate in candidates) {
+                if (!connecting) return
                 val probe = runCatching { RobotDiscovery.probe(appContext, candidate) }.getOrNull()
                 if (probe != null && probe.blid == config.blid) {
                     match = probe
@@ -391,11 +405,8 @@ class RobotRepository(context: Context) {
                 }
             }
         }
+        if (!connecting) return
         when {
-            config == null -> {
-                connecting = false
-                _status.value = ConnectionStatus.Error("Робот не выбран")
-            }
             match != null && match.ip != config.ip -> {
                 val updated = config.copy(ip = match.ip)
                 val list = _robots.value.map { if (it.blid == updated.blid) updated else it }
@@ -406,14 +417,15 @@ class RobotRepository(context: Context) {
                 master = JSONObject()
                 startConnect()
             }
-            match != null -> {
-                startConnect()
-            }
+            match != null -> startConnect()
             else -> {
-                connecting = false
-                _status.value = ConnectionStatus.Error(
-                    "Робот не найден в сети — укажите IP вручную",
-                )
+                // Not found anywhere: the robot has most likely dropped off
+                // Wi-Fi. Keep waiting for it instead of giving up.
+                logEvent("… робот не найден в сети, жду")
+                retryJob = scope.launch {
+                    delay(backoffMillis(attempt))
+                    if (connecting) startConnect()
+                }
             }
         }
     }
@@ -492,12 +504,33 @@ class RobotRepository(context: Context) {
     }
 
     private fun connectErrorMessage(error: Throwable): String = when {
-        error is MqttException && error.reasonCode in AUTH_REASON_CODES ->
-            "Неверный BLID или пароль"
-        error.message?.contains("not authorized", ignoreCase = true) == true ->
-            "Неверный BLID или пароль"
+        isAuthFailure(error) ->
+            "Неверный BLID или пароль. Обновите пароль из облака или с робота."
+        isNoRoute(error) ->
+            "Робот пропал из Wi-Fi (нет ответа в сети). Продолжаю попытки."
+        isTimeout(error) ->
+            "Робот не отвечает (таймаут). Продолжаю попытки."
         else -> describe(error)
     }
+
+    private fun isAuthFailure(error: Throwable): Boolean =
+        (error is MqttException && error.reasonCode in AUTH_REASON_CODES) ||
+            error.message?.contains("not authorized", ignoreCase = true) == true ||
+            error.message?.contains("bad user", ignoreCase = true) == true
+
+    /** Android reports a failed ARP as EHOSTUNREACH / "No route to host". */
+    private fun isNoRoute(error: Throwable): Boolean =
+        generateSequence(error as Throwable?) { it.cause }.any {
+            it is java.net.NoRouteToHostException ||
+                it.message?.contains("EHOSTUNREACH", ignoreCase = true) == true ||
+                it.message?.contains("No route to host", ignoreCase = true) == true
+        }
+
+    private fun isTimeout(error: Throwable): Boolean =
+        generateSequence(error as Throwable?) { it.cause }.any {
+            it is java.net.SocketTimeoutException ||
+                it.message?.contains("timed out", ignoreCase = true) == true
+        }
 
     /** Flatten an exception chain into one readable line. */
     private fun describe(error: Throwable): String {
@@ -513,7 +546,13 @@ class RobotRepository(context: Context) {
     }
 
     private companion object {
-        const val MAX_CONNECT_ATTEMPTS = 3
+        /** After this many failed attempts, run discovery again. */
+        const val REDISCOVER_ON_ATTEMPT = 3
+
+        /** Then re-run discovery every N attempts, in case DHCP moved the robot. */
+        const val REDISCOVER_EVERY = 8
+
+        const val MAX_BACKOFF_MS = 15_000L
 
         val AUTH_REASON_CODES = setOf(
             MqttException.REASON_CODE_FAILED_AUTHENTICATION.toInt(),

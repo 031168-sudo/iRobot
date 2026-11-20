@@ -64,12 +64,17 @@ object RobotDiscovery {
     /**
      * Sweeps the phone's /24 and returns IPs that accept TCP on [port].
      * This finds the robot even when UDP broadcast is filtered.
+     *
+     * The sweep runs [passes] times: on a busy 2.4 GHz network a single SYN
+     * is easily lost, and a second pass over the hosts that did not answer
+     * costs a couple of seconds but noticeably improves the hit rate.
      */
     suspend fun scanSubnet(
         context: Context,
         port: Int = MQTT_PORT,
-        timeoutMs: Int = 250,
+        timeoutMs: Int = 600,
         concurrency: Int = 32,
+        passes: Int = 2,
     ): List<String> = withContext(Dispatchers.IO) {
         val lan = localLan(context) ?: return@withContext emptyList()
         val octets = lan.address.address
@@ -77,12 +82,17 @@ object RobotDiscovery {
             "${octets[2].toInt() and 0xFF}"
         val results = java.util.Collections.synchronizedList(mutableListOf<String>())
         val permits = Semaphore(concurrency)
-        coroutineScope {
-            for (host in 1..254) {
-                launch {
-                    permits.withPermit {
-                        val ip = "$prefix.$host"
-                        if (isTcpOpen(ip, port, timeoutMs)) results += ip
+        repeat(passes) {
+            val pending = (1..254)
+                .map { host -> "$prefix.$host" }
+                .filterNot { ip -> ip in results }
+            if (pending.isEmpty()) return@repeat
+            coroutineScope {
+                for (ip in pending) {
+                    launch {
+                        permits.withPermit {
+                            if (isTcpOpen(ip, port, timeoutMs)) results += ip
+                        }
                     }
                 }
             }
