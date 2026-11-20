@@ -1,9 +1,15 @@
-# AGENTS.md — проект «iRobot»
+# AGENTS.md — проект «МойРобот» (BraavaLocal)
 
 ## Что это
 
-Проект про управление роботами **iRobot** в обход облака (локально).
-Пока на стадии разбора; конкретная задача — в `HANDOFF.md`.
+Android-приложение для **локального управления iRobot Braava Jet m6 по Wi-Fi**,
+без облака: MQTT 3.1.1 поверх TLS, порт **8883**; обнаружение — UDP **5678**.
+Пакет `com.braava.local`, Kotlin + Jetpack Compose.
+
+- **Репозиторий:** https://github.com/031168-sudo/iRobot
+- **Текущая версия:** 2.6 (`versionCode 17`), ветка `master`.
+- **Актуальное состояние и передача:** `HANDOFF.md`.
+- **Детали протокола и телеметрии:** `SESSION.md`.
 
 ## Устройства и каналы управления
 
@@ -32,31 +38,42 @@
 - Serial-порта нет.
 
 ## Ограничения, о которых помнить
+
 - Облако iRobot для РФ недоступно без VPN; робот виснет на загрузке карты,
   когда не может достучаться до сервера.
 - Локально можно управление, но **без карты**.
 - Полный доступ к карте — только через облако (VPN на уровне сети робота,
   например GL.iNet за 4G-роутером).
+- m6 принимает **одно локальное MQTT-соединение**: второй клиент (телефон,
+  Home Assistant, `roombapy`) может мешать подключению.
+- Команды нужно отправлять с **QoS 0**; на QoS 1 брокер не подтверждает.
+- `train` создаёт версии карты, но **не промоутит** `active_pmapv_id`; это
+  делает облако/нативное приложение.
 
 ## Правило
-**Коммит/пуш — только по явной команде пользователя.**
-Слово **«коммить/закоммить»** означает полный цикл:
-1. собрать локально `./gradlew :app:assembleDebug` (проверка, что не сломано);
-2. `git add -A` и коммит всех изменений;
-3. `git push` в GitHub (там автоматически отработает CI и соберёт APK-артефакт);
-4. скопировать APK в `/home/gmpony/public/apk/braavalocal-debug.apk`
-   (шаг 4 — машинно-зависимый: если пути нет, просто пропустить).
 
-Без такой команды ничего не коммитить и не пушить, APK не публиковать.
+**Коммит/пуш — только по явной команде пользователя.**
+
+**«коммить/закоммить»** означает:
+1. `git add -A` и коммит всех изменений;
+2. `git push` в GitHub — дальше APK собирает GitHub Actions.
+
+Локальная сборка перед коммитом — по возможности, если в окружении есть
+Android SDK. На сервере без SDK она не требуется: каноническая сборка идёт в CI.
+Отдельной публикации APK на этом сервере больше нет.
 
 ## Сборка и CI
-- Локально: `./gradlew :app:assembleDebug` → `app/build/outputs/apk/debug/app-debug.apk`.
-- Публикация APK: скопировать собранный файл в `/home/gmpony/public/apk/braavalocal-debug.apk`
-  (раздаётся как `https://gmpony.alfanomy.ru/apk/braavalocal-debug.apk`).
+
+- **Каноническая сборка:** GitHub Actions `.github/workflows/android.yml`
+  на push в `master` и по `workflow_dispatch`.
+- CI ставит JDK 17, использует предустановленный Android SDK на `ubuntu-latest`,
+  выполняет `./gradlew :app:assembleDebug` и выкладывает артефакт
+  **`braavalocal-debug-apk`**.
+- Локально (опционально, при наличии SDK):
+  `./gradlew :app:assembleDebug` → `app/build/outputs/apk/debug/app-debug.apk`.
 - Подпись: общий debug-ключ **в репозитории** `keystore/debug.keystore`
   (`alias=androiddebugkey`, пароли `android`) — чтобы CI и локальные сборки
   совпадали и обновления ставились поверх старой версии. Ключ намеренно
   публичный (приложение некоммерческое).
-- CI: GitHub Actions `.github/workflows/android.yml` собирает debug APK на push
-  в `master` и выкладывает артефакт `braavalocal-debug-apk`.
-- В git **не хранятся**: `local.properties`, `*.apk`, `*.aab` (см. `.gitignore`).
+- В git **не хранятся**: `local.properties`, `.gradle/`, `app/build/`,
+  `*.apk`, `*.aab` (см. `.gitignore`).
