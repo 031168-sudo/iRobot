@@ -4,7 +4,10 @@
 Глубокие детали протокола — в `SESSION.md`, правила проекта — в `AGENTS.md`.
 
 - **Репозиторий:** https://github.com/031168-sudo/iRobot
-- **Версия:** 2.8 (`versionCode 19`), ветка `master`.
+- **Версия:** 2.9 (`versionCode 20`), ветка `master`.
+- **Что нового в 2.9:** разрешение `NEARBY_WIFI_DEVICES` и его запрос при старте —
+  на Android 16 с включённой Local Network Protection без него UDP на локальные
+  адреса падает с `sendto failed: EPERM`. Остальное — из 2.8.
 - **Что нового в 2.8:** поддержка локального управления Xiaomi-пылесосом
   (`roborock.vacuum.m1s`): вход в Mi-аккаунт, получение miIO-токена, статус,
   базовые команды и **уборка по комнатам** (`app_segment_clean`). Карта
