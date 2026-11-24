@@ -44,6 +44,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.braava.local.data.NetworkDiagnostics
 import com.braava.local.data.RobotConfig
 import com.braava.local.data.XiaomiStatus
+import com.braava.local.data.xiaomi.MiioDiscovery
 import kotlinx.coroutines.launch
 
 /**
@@ -70,6 +71,9 @@ fun XiaomiControlScreen(
     var ipDraft by remember { mutableStateOf(config.ip) }
     var diagnosticsOpen by remember { mutableStateOf(false) }
     var diagnosticsLines by remember { mutableStateOf<List<String>>(emptyList()) }
+    var foundOpen by remember { mutableStateOf(false) }
+    var searching by remember { mutableStateOf(false) }
+    var foundDevices by remember { mutableStateOf<List<MiioDiscovery.Found>>(emptyList()) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
@@ -219,7 +223,53 @@ fun XiaomiControlScreen(
             }) {
                 Text("Изменить IP")
             }
+            TextButton(
+                onClick = {
+                    searching = true
+                    scope.launch {
+                        foundDevices = MiioDiscovery.discover(context)
+                        foundOpen = true
+                        searching = false
+                    }
+                },
+            ) {
+                Text(if (searching) "Ищу miIO-устройства…" else "Найти робота в сети")
+            }
         }
+    }
+
+    if (foundOpen) {
+        AlertDialog(
+            onDismissRequest = { foundOpen = false },
+            confirmButton = {
+                TextButton(onClick = { foundOpen = false }) { Text("Закрыть") }
+            },
+            title = { Text("miIO-устройства в сети") },
+            text = {
+                Column {
+                    if (foundDevices.isEmpty()) {
+                        Text(
+                            "Ничего не найдено. Разбудите робота (уборка или кнопка) " +
+                                "и повторите: на базе он может не отвечать.",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    } else {
+                        foundDevices.forEach { device ->
+                            TextButton(
+                                onClick = {
+                                    if (device.ip != config.ip) {
+                                        viewModel.updateRobot(config.copy(ip = device.ip))
+                                    }
+                                    foundOpen = false
+                                },
+                            ) {
+                                Text("${device.ip}  •  id ${device.deviceId}")
+                            }
+                        }
+                    }
+                }
+            },
+        )
     }
 
     if (diagnosticsOpen) {
