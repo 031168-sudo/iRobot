@@ -59,7 +59,7 @@ class MiioClient(
             .putInt(deviceId)
             .putInt(stamp)
             .array()
-        val checksum = md5(header + key() + encrypted)
+        val checksum = md5(header + tokenBytes() + encrypted)
         val packet = header + checksum + encrypted
 
         var lastError: Exception? = null
@@ -73,6 +73,7 @@ class MiioClient(
                 val end = minOf(respLength, data.size)
                 if (end <= HEADER) throw MiioException("Пустой ответ miIO")
                 val text = String(decrypt(data.copyOfRange(HEADER, end)), Charsets.UTF_8)
+                    .trimEnd('\u0000')
                 val json = JSONObject(text)
                 val error = json.optJSONObject("error")
                 if (error != null) {
@@ -132,10 +133,21 @@ class MiioClient(
         }
     }
 
-    private fun key(): ByteArray = md5(token.toByteArray(Charsets.UTF_8))
+    /** The token is 32 hex characters; miIO uses its 16 raw bytes. */
+    private fun tokenBytes(): ByteArray {
+        val clean = token.trim()
+        if (clean.length != 32) throw MiioException("Токен должен быть 32 hex-символа")
+        return ByteArray(16) { index ->
+            val high = Character.digit(clean[index * 2], 16)
+            val low = Character.digit(clean[index * 2 + 1], 16)
+            if (high < 0 || low < 0) throw MiioException("Токен содержит не hex-символы")
+            ((high shl 4) or low).toByte()
+        }
+    }
 
-    private fun iv(): ByteArray =
-        md5(key() + token.toByteArray(Charsets.UTF_8))
+    private fun key(): ByteArray = md5(tokenBytes())
+
+    private fun iv(): ByteArray = md5(key() + tokenBytes())
 
     private fun encrypt(data: ByteArray): ByteArray {
         val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
@@ -144,7 +156,8 @@ class MiioClient(
             SecretKeySpec(key(), "AES"),
             IvParameterSpec(iv()),
         )
-        return cipher.doFinal(data)
+        // miIO appends a NUL terminator before encrypting.
+        return cipher.doFinal(data + byteArrayOf(0))
     }
 
     private fun decrypt(data: ByteArray): ByteArray {
