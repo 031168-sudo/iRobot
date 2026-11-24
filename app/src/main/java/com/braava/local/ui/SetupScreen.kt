@@ -475,6 +475,7 @@ private fun XiaomiSetup(viewModel: MainViewModel, onAdded: () -> Unit) {
     var login by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var ip by remember { mutableStateOf("") }
+    var manualToken by remember { mutableStateOf("") }
     var selected by remember { mutableStateOf<XiaomiCloud.XiaomiDevice?>(null) }
 
     Text("Шаг 1. Вход в Mi-аккаунт", style = MaterialTheme.typography.titleMedium)
@@ -560,6 +561,30 @@ private fun XiaomiSetup(viewModel: MainViewModel, onAdded: () -> Unit) {
         modifier = Modifier.fillMaxWidth(),
     ) {
         Text("Сохранить и подключиться")
+    }
+
+    Spacer(Modifier.height(24.dp))
+    Text("Если вход в аккаунт не проходит", style = MaterialTheme.typography.titleMedium)
+    Spacer(Modifier.height(6.dp))
+    Text(
+        "Можно ввести miIO-токен вручную (32 hex). Он не меняется и не зависит " +
+            "от облака. IP берётся из поля выше.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Spacer(Modifier.height(8.dp))
+    PasswordField(
+        value = manualToken,
+        onValueChange = { manualToken = it },
+        label = "miIO-токен",
+    )
+    Spacer(Modifier.height(8.dp))
+    Button(
+        onClick = { if (viewModel.saveXiaomiManual(ip, manualToken)) onAdded() },
+        enabled = ip.isNotBlank() && manualToken.isNotBlank(),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Text("Сохранить по токену")
     }
 }
 

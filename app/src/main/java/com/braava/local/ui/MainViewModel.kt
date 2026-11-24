@@ -255,6 +255,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return true
     }
 
+    /** Fallback when the cloud login is blocked by 2FA: save a known token. */
+    fun saveXiaomiManual(ip: String, token: String): Boolean {
+        if (ip.isBlank() || token.isBlank()) {
+            _error.value = "Укажите IP-адрес и miIO-токен"
+            return false
+        }
+        val cleanIp = ip.trim()
+        repository.addRobot(
+            RobotConfig(
+                blid = "xiaomi-$cleanIp",
+                password = "",
+                ip = cleanIp,
+                name = "Xiaomi",
+                sku = "roborock.vacuum",
+                kind = RobotKind.XIAOMI,
+                token = token.trim(),
+            ),
+        )
+        return true
+    }
+
     fun xiaomiRefresh() = xiaomi.refresh()
 
     fun xiaomiLoadRooms() = xiaomi.loadRooms()

@@ -85,15 +85,19 @@ class XiaomiCloud(
             .build()
         val step2Text = client.newCall(step2).execute().use { it.body?.string().orEmpty() }
         val step2Json = jsonAfterPrefix(step2Text)
-        if (step2Json.optString("result") != "ok") {
-            val code = step2Json.optInt("code")
+        val result = step2Json.optString("result")
+        val code = step2Json.optInt("code", 0)
+        if (result != "ok" || code != 0) {
             val desc = step2Json.optString("desc")
                 .ifBlank { step2Json.optString("tip") }
                 .ifBlank { "код $code" }
-            if (code == 70016 || code == 70022) {
+            if (code != 0 ||
+                step2Json.has("notificationUrl") ||
+                step2Json.has("captchaUrl")
+            ) {
                 throw TwoFactorException(
-                    "Mi-аккаунт требует подтверждения (2FA/капча). " +
-                        "Войдите в Mi Home на телефоне и повторите.",
+                    "Mi-аккаунт требует подтверждения (2FA/капча, код $code). " +
+                        "Подтвердите вход в Mi Home и повторите или введите токен вручную.",
                 )
             }
             throw CloudException("Не удалось войти в Mi-аккаунт: $desc")
@@ -102,7 +106,10 @@ class XiaomiCloud(
         val ssecurity = step2Json.optString("ssecurity")
         val location = step2Json.optString("location")
         if (userId.isBlank() || ssecurity.isBlank() || location.isBlank()) {
-            throw CloudException("Mi-аккаунт вернул неполный ответ")
+            val keys = step2Json.keys().asSequence().joinToString(",")
+            throw CloudException(
+                "Mi-аккаунт вернул неполный ответ (code=$code, поля: $keys)",
+            )
         }
 
         val step3 = Request.Builder().url(location).get().build()
