@@ -12,6 +12,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
@@ -32,14 +33,18 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.braava.local.data.NetworkDiagnostics
 import com.braava.local.data.RobotConfig
 import com.braava.local.data.XiaomiStatus
+import kotlinx.coroutines.launch
 
 /**
  * Control screen for a Xiaomi/Roborock vacuum: local miIO only, no cloud.
@@ -63,6 +68,10 @@ fun XiaomiControlScreen(
     var roomsLoaded by remember { mutableStateOf(false) }
     var ipDialogOpen by remember { mutableStateOf(false) }
     var ipDraft by remember { mutableStateOf(config.ip) }
+    var diagnosticsOpen by remember { mutableStateOf(false) }
+    var diagnosticsLines by remember { mutableStateOf<List<String>>(emptyList()) }
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
 
     Scaffold(
         modifier = modifier,
@@ -79,6 +88,15 @@ fun XiaomiControlScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = {
+                        diagnosticsOpen = true
+                        diagnosticsLines = listOf("Проверка…")
+                        scope.launch {
+                            diagnosticsLines = NetworkDiagnostics.run(context, config.ip)
+                        }
+                    }) {
+                        Icon(Icons.Filled.BugReport, contentDescription = "Диагностика сети")
+                    }
                     IconButton(onClick = onOpenManager) {
                         Icon(Icons.Filled.Settings, contentDescription = "Роботы")
                     }
@@ -202,6 +220,31 @@ fun XiaomiControlScreen(
                 Text("Изменить IP")
             }
         }
+    }
+
+    if (diagnosticsOpen) {
+        AlertDialog(
+            onDismissRequest = { diagnosticsOpen = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    diagnosticsLines = listOf("Проверка…")
+                    scope.launch {
+                        diagnosticsLines = NetworkDiagnostics.run(context, config.ip)
+                    }
+                }) { Text("Повторить") }
+            },
+            dismissButton = {
+                TextButton(onClick = { diagnosticsOpen = false }) { Text("Закрыть") }
+            },
+            title = { Text("Диагностика сети") },
+            text = {
+                Column {
+                    diagnosticsLines.forEach { line ->
+                        Text(line, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            },
+        )
     }
 
     if (ipDialogOpen) {
