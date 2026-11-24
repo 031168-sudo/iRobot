@@ -43,7 +43,15 @@ class ConfigStore(context: Context) {
             val blid = obj.optString("blid")
             val password = obj.optString("password")
             val ip = obj.optString("ip")
-            if (blid.isBlank() || password.isBlank() || ip.isBlank()) {
+            val kind = runCatching {
+                RobotKind.valueOf(obj.optString("kind", RobotKind.IROBOT.name))
+            }.getOrDefault(RobotKind.IROBOT)
+            val token = obj.optString("token").takeIf { it.isNotBlank() }
+            val valid = when (kind) {
+                RobotKind.IROBOT -> blid.isNotBlank() && password.isNotBlank() && ip.isNotBlank()
+                RobotKind.XIAOMI -> blid.isNotBlank() && token != null && ip.isNotBlank()
+            }
+            if (!valid) {
                 null
             } else {
                 RobotConfig(
@@ -52,6 +60,8 @@ class ConfigStore(context: Context) {
                     ip = ip,
                     name = obj.optString("name").takeIf { it.isNotBlank() },
                     sku = obj.optString("sku").takeIf { it.isNotBlank() },
+                    kind = kind,
+                    token = token,
                 )
             }
         }
@@ -66,7 +76,9 @@ class ConfigStore(context: Context) {
                     .put("password", robot.password)
                     .put("ip", robot.ip)
                     .put("name", robot.name)
-                    .put("sku", robot.sku),
+                    .put("sku", robot.sku)
+                    .put("kind", robot.kind.name)
+                    .put("token", robot.token),
             )
         }
         prefs.edit().putString(KEY_ROBOTS, array.toString()).apply()

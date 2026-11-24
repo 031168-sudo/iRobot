@@ -53,6 +53,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.braava.local.data.RobotConfig
 import com.braava.local.data.cloud.IrobotCloud
+import com.braava.local.data.cloud.XiaomiCloud
 import com.braava.local.data.discovery.RobotDiscovery
 
 @Composable
@@ -114,16 +115,18 @@ fun SetupScreen(
         }
 
         Row(Modifier.fillMaxWidth()) {
-            TabButton("Аккаунт iRobot", tab == 0, Modifier.weight(1f)) { tab = 0 }
-            Spacer(Modifier.width(8.dp))
+            TabButton("iRobot", tab == 0, Modifier.weight(1f)) { tab = 0 }
+            Spacer(Modifier.width(6.dp))
             TabButton("Вручную", tab == 1, Modifier.weight(1f)) { tab = 1 }
+            Spacer(Modifier.width(6.dp))
+            TabButton("Xiaomi", tab == 2, Modifier.weight(1f)) { tab = 2 }
         }
         Spacer(Modifier.height(20.dp))
 
-        if (tab == 0) {
-            CloudSetup(viewModel, onAdded = { onClose?.invoke() })
-        } else {
-            ManualSetup(viewModel, onAdded = { onClose?.invoke() })
+        when (tab) {
+            0 -> CloudSetup(viewModel, onAdded = { onClose?.invoke() })
+            1 -> ManualSetup(viewModel, onAdded = { onClose?.invoke() })
+            else -> XiaomiSetup(viewModel, onAdded = { onClose?.invoke() })
         }
 
         if (busy) {
@@ -461,6 +464,102 @@ private fun RobotCard(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+    }
+}
+
+@Composable
+private fun XiaomiSetup(viewModel: MainViewModel, onAdded: () -> Unit) {
+    val devices by viewModel.xiaomiDevices.collectAsStateWithLifecycle()
+    val busy by viewModel.busy.collectAsStateWithLifecycle()
+
+    var login by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    var ip by remember { mutableStateOf("") }
+    var selected by remember { mutableStateOf<XiaomiCloud.XiaomiDevice?>(null) }
+
+    Text("Шаг 1. Вход в Mi-аккаунт", style = MaterialTheme.typography.titleMedium)
+    Spacer(Modifier.height(8.dp))
+    Text(
+        "Китайский аккаунт Mi Home. Логин нужен один раз, чтобы получить локальный " +
+            "токен робота; пароль в приложении не сохраняется.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Spacer(Modifier.height(12.dp))
+    OutlinedTextField(
+        value = login,
+        onValueChange = { login = it },
+        label = { Text("Mi ID или e-mail") },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(
+            keyboardType = KeyboardType.Email,
+            autoCorrectEnabled = false,
+            capitalization = KeyboardCapitalization.None,
+        ),
+        modifier = Modifier.fillMaxWidth(),
+    )
+    Spacer(Modifier.height(8.dp))
+    PasswordField(
+        value = password,
+        onValueChange = { password = it },
+        label = "Пароль Mi",
+    )
+    Spacer(Modifier.height(12.dp))
+    Button(
+        onClick = { viewModel.xiaomiLogin(login, password) },
+        enabled = !busy,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Icon(Icons.Filled.CloudDownload, contentDescription = null)
+        Spacer(Modifier.width(8.dp))
+        Text("Получить доступ к роботам")
+    }
+
+    if (devices.isNotEmpty()) {
+        Spacer(Modifier.height(20.dp))
+        Text("Шаг 2. Выберите робота", style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.height(8.dp))
+        devices.forEach { device ->
+            RobotCard(
+                title = device.name.ifBlank { device.model },
+                subtitle = buildString {
+                    append("Модель: ${device.model}")
+                    append("\nIP: ${device.ip ?: "неизвестен"}")
+                },
+                selected = selected?.did == device.did,
+                onClick = {
+                    selected = device
+                    if (device.ip != null) ip = device.ip
+                },
+            )
+            Spacer(Modifier.height(8.dp))
+        }
+    }
+
+    Spacer(Modifier.height(20.dp))
+    Text("Шаг 3. IP-адрес в локальной сети", style = MaterialTheme.typography.titleMedium)
+    Spacer(Modifier.height(8.dp))
+    OutlinedTextField(
+        value = ip,
+        onValueChange = { ip = it },
+        label = { Text("IP-адрес") },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+        modifier = Modifier.fillMaxWidth(),
+    )
+    Text(
+        "Адрес приходит из облака; поправьте, если робот его сменил.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+
+    Spacer(Modifier.height(20.dp))
+    Button(
+        onClick = { selected?.let { if (viewModel.saveXiaomi(it, ip)) onAdded() } },
+        enabled = selected != null && ip.isNotBlank(),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Text("Сохранить и подключиться")
     }
 }
 

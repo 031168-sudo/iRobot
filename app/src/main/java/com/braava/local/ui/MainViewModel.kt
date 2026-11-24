@@ -7,8 +7,10 @@ import com.braava.local.BraavaApp
 import com.braava.local.data.CloudCredentialStore
 import com.braava.local.data.ConnectionDiagnostics
 import com.braava.local.data.RobotConfig
+import com.braava.local.data.RobotKind
 import com.braava.local.data.cloud.IrobotCloud
 import com.braava.local.data.cloud.LocalPasswordFetcher
+import com.braava.local.data.cloud.XiaomiCloud
 import com.braava.local.data.discovery.RobotDiscovery
 import com.braava.local.data.model.CloudMap
 import com.braava.local.data.model.CloudRegion
@@ -17,6 +19,7 @@ import com.braava.local.data.model.MissionEntry
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
@@ -24,6 +27,7 @@ import org.json.JSONObject
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val repository = (application as BraavaApp).repository
+    private val xiaomi = (application as BraavaApp).xiaomi
     private val credentialStore = CloudCredentialStore(application.applicationContext)
 
     val robots = repository.robots
@@ -34,6 +38,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val events = repository.events
     val trail = repository.trail
     val sensorDeltas = repository.sensorDeltas
+
+    // ----- Xiaomi (miIO) -----
+
+    val xiaomiStatus = xiaomi.status
+    val xiaomiRooms = xiaomi.rooms
+    val xiaomiError = xiaomi.error
+    val xiaomiBusy = xiaomi.busy
+
+    private val _xiaomiDevices = MutableStateFlow<List<XiaomiCloud.XiaomiDevice>>(emptyList())
+    val xiaomiDevices = _xiaomiDevices.asStateFlow()
 
     private val _busy = MutableStateFlow(false)
     val busy = _busy.asStateFlow()
@@ -150,6 +164,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     init {
         // Auto-connect once the repository (and its listener) is fully built.
         if (repository.selected.value != null) repository.connect()
+        viewModelScope.launch {
+            repository.selected.collect { config ->
+                xiaomi.select(if (config?.kind == RobotKind.XIAOMI) config else null)
+            }
+        }
     }
 
     // ----- configuration -----
@@ -189,6 +208,68 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         )
         return true
     }
+
+    // ----- Xiaomi -----
+
+    fun xiaomiLogin(login: String, password: String) {
+        if (login.isBlank() || password.isBlank()) {
+            _error.value = "Введите логин и пароль Mi-аккаунта"
+            return
+        }
+        _busy.value = true
+        viewModelScope.launch {
+            try {
+                val devices = XiaomiCloud().fetchDevices(login.trim(), password)
+                _xiaomiDevices.value = devices
+                if (devices.isEmpty()) {
+                    _error.value = "В аккаунте нет устройств с miIO-токеном"
+                }
+            } catch (e: Exception) {
+                _error.value = e.message ?: "Ошибка входа в Mi-аккаунт"
+            } finally {
+                _busy.value = false
+            }
+        }
+    }
+
+    fun clearXiaomiDevices() {
+        _xiaomiDevices.value = emptyList()
+    }
+
+    fun saveXiaomi(device: XiaomiCloud.XiaomiDevice, ip: String): Boolean {
+        if (ip.isBlank()) {
+            _error.value = "Укажите IP-адрес робота"
+            return false
+        }
+        repository.addRobot(
+            RobotConfig(
+                blid = device.did.ifBlank { device.mac ?: device.token.take(12) },
+                password = "",
+                ip = ip.trim(),
+                name = device.name,
+                sku = device.model,
+                kind = RobotKind.XIAOMI,
+                token = device.token,
+            ),
+        )
+        return true
+    }
+
+    fun xiaomiRefresh() = xiaomi.refresh()
+
+    fun xiaomiLoadRooms() = xiaomi.loadRooms()
+
+    fun xiaomiStart() = xiaomi.start()
+
+    fun xiaomiPause() = xiaomi.pause()
+
+    fun xiaomiStop() = xiaomi.stop()
+
+    fun xiaomiDock() = xiaomi.dock()
+
+    fun xiaomiFind() = xiaomi.find()
+
+    fun xiaomiClean(segments: List<Int>) = xiaomi.cleanSegments(segments)
 
     // ----- cloud -----
 

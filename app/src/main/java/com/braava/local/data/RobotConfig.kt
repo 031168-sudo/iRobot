@@ -12,4 +12,7 @@ data class RobotConfig(
     val ip: String,
     val name: String? = null,
     val sku: String? = null,
+    val kind: RobotKind = RobotKind.IROBOT,
+    /** miIO token for [RobotKind.XIAOMI]; unused for iRobot. */
+    val token: String? = null,
 )

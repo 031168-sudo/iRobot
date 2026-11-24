@@ -128,6 +128,7 @@ class RobotRepository(context: Context) {
     }
 
     fun connect() {
+        if (_selected.value?.kind == RobotKind.XIAOMI) return
         if (client != null || connecting) return
         if (_selected.value == null) return
         connecting = true

@@ -64,7 +64,11 @@ fun RobotEditDialog(
                     .verticalScroll(rememberScrollState()),
             ) {
                 Text(
-                    "BLID: ${robot.blid}",
+                    if (robot.kind == com.braava.local.data.RobotKind.XIAOMI) {
+                        "ID: ${robot.blid}"
+                    } else {
+                        "BLID: ${robot.blid}"
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -87,10 +91,12 @@ fun RobotEditDialog(
                         modifier = Modifier.weight(1f),
                     )
                     Spacer(Modifier.width(8.dp))
-                    FilledTonalButton(onClick = { viewModel.discover() }) {
-                        Icon(Icons.Filled.Search, contentDescription = null)
-                        Spacer(Modifier.width(6.dp))
-                        Text("Найти")
+                    if (robot.kind == com.braava.local.data.RobotKind.IROBOT) {
+                        FilledTonalButton(onClick = { viewModel.discover() }) {
+                            Icon(Icons.Filled.Search, contentDescription = null)
+                            Spacer(Modifier.width(6.dp))
+                            Text("Найти")
+                        }
                     }
                 }
                 if (busy) {

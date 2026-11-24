@@ -10,7 +10,7 @@ iRobot Braava Jet m6** (в обход облака) и все находки п�
 - **Пакет:** `com.braava.local`
 - **Стек:** Kotlin + Jetpack Compose, Gradle 8.11.1 / AGP 8.7.3 / Kotlin 2.0.21
 - **Репозиторий:** https://github.com/031168-sudo/iRobot
-- **Версия:** 2.7 (`versionCode 18`)
+- **Версия:** 2.8 (`versionCode 19`)
 - **APK:** GitHub Actions, артефакт `braavalocal-debug-apk`; локальная публикация больше не используется.
 
 ---
@@ -81,6 +81,23 @@ iRobot Braava Jet m6** (в обход облака) и все находки п�
   - Локальный пароль может устареть (после перепривязки/сброса): сеть и TLS
     в порядке, но брокер отвечает `CONNACK 4` «bad user/password».
     Пароль берётся из облака или с робота в режиме прослушивания.
+
+---
+
+## 3А. Локальный miIO (Xiaomi / Roborock)
+
+- Транспорт: UDP **54321**, JSON, AES-128-CBC.
+- Ключ = MD5(токен), IV = MD5(ключ + токен); токен — 32 hex из Mi-облака.
+- Рукопожатие: 32 байта `21 31 00 20` + 28×`FF` → ответ с device id и stamp.
+- Пакет: заголовок 32 байта (magic, длина, 0, device id, stamp, MD5-чек),
+  затем шифрованный JSON `{id, method, params}`.
+- Команды `roborock.vacuum.m1s`: `get_status`, `get_room_mapping`,
+  `app_segment_clean`, `app_start/stop/pause/charge`, `find_me`;
+  `app_zoned_clean` (зоны по координатам) у него нет.
+- Карта: `get_map_v1` возвращает указатель; файл скачивается с
+  `api.io.mi.com` — локально карты нет.
+- На базе робот может спать и не отвечать на miIO, пока его не разбудят
+  (запуск уборки/кнопка).
 
 ---
 

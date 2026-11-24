@@ -43,6 +43,13 @@ fun BraavaApp(viewModel: MainViewModel = viewModel()) {
                     // to go back to.
                     onClose = if (current != null) ({ showManager = false }) else null,
                 )
+            } else if (current.kind == com.braava.local.data.RobotKind.XIAOMI) {
+                XiaomiControlScreen(
+                    viewModel = viewModel,
+                    config = current,
+                    modifier = Modifier.padding(padding),
+                    onOpenManager = { showManager = true },
+                )
             } else {
                 ControlScreen(
                     viewModel = viewModel,
