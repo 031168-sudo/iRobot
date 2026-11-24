@@ -42,8 +42,11 @@ jobs:
             TAG="v${VERSION}"
           fi
           ASSET="MyRobot-${VERSION}.apk"
+          LATEST="MyRobot.apk"
           cp app/build/outputs/apk/debug/app-debug.apk "$ASSET"
+          # Fixed-name copy so /releases/latest/download/MyRobot.apk always works.
+          cp app/build/outputs/apk/debug/app-debug.apk "$LATEST"
           gh release view "$TAG" >/dev/null 2>&1 || \
             gh release create "$TAG" --title "МойРобот ${VERSION}" --generate-notes
-          gh release upload "$TAG" "$ASSET" --clobber
-          echo "Release: ${TAG}, asset: ${ASSET}"
+          gh release upload "$TAG" "$ASSET" "$LATEST" --clobber
+          echo "Release: ${TAG}, assets: ${ASSET}, ${LATEST}"

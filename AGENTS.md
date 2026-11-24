@@ -81,7 +81,13 @@ Android SDK. На сервере без SDK она не требуется: ка
   на push в `master` и по `workflow_dispatch`.
 - **Релиз с постоянной ссылкой:** `.github/workflows/release.yml` на тег `v*`
   (или ручной запуск) собирает тот же debug APK и прикрепляет его к GitHub
-  Release: `https://github.com/031168-sudo/iRobot/releases/download/v2.7/MyRobot-2.7.apk`.
+  Release под двумя именами:
+  - **всегда последняя версия** —
+    `https://github.com/031168-sudo/iRobot/releases/latest/download/MyRobot.apk`
+  - конкретная версия —
+    `https://github.com/031168-sudo/iRobot/releases/download/v2.8/MyRobot-2.8.apk`
+  После зелёной сборки новой версии ставить тег `vX.Y` и пушить его — это и
+  есть «прямая ссылка на APK» для пользователя (без страницы Actions).
 - CI ставит JDK 17, использует предустановленный Android SDK на `ubuntu-latest`,
   выполняет `./gradlew :app:assembleDebug` и выкладывает артефакт
   **`braavalocal-debug-apk`**.

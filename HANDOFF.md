@@ -96,8 +96,13 @@ minSdk 26, target/compileSdk 35.
 Постоянная ссылка — GitHub Release (workflow **Release APK**
 `.github/workflows/release.yml`, запуск на тег `v*` или вручную):
 
-- `https://github.com/031168-sudo/iRobot/releases/download/v2.7/MyRobot-2.7.apk`
-- тег создаётся под версию из `app/build.gradle.kts` (`v2.7` и т.д.);
+- **последняя версия (всегда):**
+  `https://github.com/031168-sudo/iRobot/releases/latest/download/MyRobot.apk`
+- **конкретная версия:**
+  `https://github.com/031168-sudo/iRobot/releases/download/v2.8/MyRobot-2.8.apk`
+- тег создаётся под версию из `app/build.gradle.kts` (`v2.8` и т.д.);
+- после зелёной сборки новой версии поставить и запушить тег `vX.Y` — тогда
+  прямые ссылки обновятся (`latest` всегда указывает на последний релиз);
 - рядом с релизом можно скачать `app-debug.apk` из артефактов run.
 
 Скачать APK из CI:
