@@ -191,17 +191,20 @@ class XiaomiCloud(
         val stsUrl = sts
         client.newCall(Request.Builder().url(stsUrl).build()).execute().close()
 
-        val serviceToken = jar.find("serviceToken", ".sts.api.io.mi.com")?.value
-            ?: jar.find("serviceToken")?.value
+        val serviceToken = jar.all("serviceToken")
+            .firstOrNull { it.domain.contains("sts") }?.value
+            ?: jar.all("serviceToken").firstOrNull()?.value
             ?: throw CloudException("2FA: нет serviceToken")
         // The jar may hold several "userId" cookies (the e-mail from step 1
         // and the numeric id set by the identity flow); the API needs the
-        // numeric one.
-        val userId = listOf(".xiaomi.com", ".sts.api.io.mi.com", null)
-            .firstNotNullOfOrNull { domain ->
-                jar.find("userId", domain)?.value?.takeIf { value -> value.all(Char::isDigit) }
-            }
-            ?: throw CloudException("2FA: нет числового userId")
+        // numeric one, wherever it is stored.
+        val userId = jar.all("userId")
+            .map { it.value.trim() }
+            .firstOrNull { value -> value.isNotEmpty() && value.all(Char::isDigit) }
+            ?: throw CloudException(
+                "2FA: нет числового userId (cookie userId: " +
+                    jar.all("userId").joinToString { "${it.domain}${it.path}" } + ")",
+            )
         val session = Session(userId, serviceToken, ssecurity)
         LoginResult.Devices(listDevices(session), session)
     }
@@ -489,6 +492,8 @@ class XiaomiCloud(
 
         fun find(name: String, domain: String? = null): Cookie? =
             items.firstOrNull { it.name == name && (domain == null || it.domain == domain) }
+
+        fun all(name: String): List<Cookie> = items.filter { it.name == name }
     }
 
     private class Rc4(key: ByteArray) {
