@@ -224,10 +224,25 @@ class XiaomiCloud(
         repeat: Int = 1,
     ): JSONObject = withContext(Dispatchers.IO) {
         val ids = JSONArray().apply { segments.forEach { put(it) } }
-        val params = JSONArray().put(
+        val arrayParams = JSONArray().put(
             JSONObject().put("segments", ids).put("repeat", repeat),
         )
-        sendCommand(session, did, "app_segment_clean", params)
+        try {
+            sendCommand(session, did, "app_segment_clean", arrayParams)
+        } catch (e: CloudException) {
+            // The Mi Home cloud has been seen to reject the array form with
+            // "data for segment is not a number"; retry with a bare object.
+            if (e.message?.contains("segment", ignoreCase = true) == true) {
+                sendCommandValue(
+                    session,
+                    did,
+                    "app_segment_clean",
+                    JSONObject().put("segments", ids).put("repeat", repeat),
+                )
+            } else {
+                throw e
+            }
+        }
     }
 
     suspend fun sendCommand(
@@ -235,13 +250,20 @@ class XiaomiCloud(
         did: String,
         method: String,
         params: JSONArray,
-    ): JSONObject = withContext(Dispatchers.IO) {
+    ): JSONObject = sendCommandValue(session, did, method, params)
+
+    private fun sendCommandValue(
+        session: Session,
+        did: String,
+        method: String,
+        params: Any,
+    ): JSONObject {
         val data = JSONObject()
             .put("id", 1)
             .put("method", method)
             .put("params", params)
             .toString()
-        signedPost(session, "https://api.io.mi.com/app/home/rpc/$did", data)
+        return signedPost(session, "https://api.io.mi.com/app/home/rpc/$did", data)
     }
 
     suspend fun findDid(session: Session, token: String): String? = withContext(Dispatchers.IO) {
