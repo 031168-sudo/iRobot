@@ -52,7 +52,9 @@ class MiioClient(
             .toString()
         val encrypted = encrypt(body.toByteArray(Charsets.UTF_8))
         val length = HEADER + encrypted.size
-        val header = ByteBuffer.allocate(HEADER).order(ByteOrder.BIG_ENDIAN)
+        // The first 16 bytes are the header fields; the checksum (16 bytes)
+        // follows them, so the fixed part of the packet is 32 bytes.
+        val header = ByteBuffer.allocate(16).order(ByteOrder.BIG_ENDIAN)
             .putShort(MAGIC.toShort())
             .putShort(length.toShort())
             .putInt(0)
