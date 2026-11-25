@@ -220,8 +220,8 @@ class XiaomiRepository(context: Context) {
                 state = obj.optInt("state"),
                 errorCode = obj.optInt("error_code"),
                 battery = obj.optInt("battery"),
-                cleanTimeSec = obj.optInt("clean_time") * 60,
-                cleanAreaMm2 = obj.optLong("clean_area") * 100,
+                cleanTimeSec = obj.optInt("clean_time"),
+                cleanAreaMm2 = obj.optLong("clean_area"),
             )
         }
         if (array.length() < 1) throw IllegalStateException("Пустой ответ get_status")
