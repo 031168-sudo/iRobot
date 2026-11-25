@@ -152,7 +152,7 @@ class XiaomiRepository(context: Context) {
         if (segments.isEmpty()) return
         val ids = JSONArray().apply { segments.forEach { put(it) } }
         val params = JSONArray().put(JSONObject().put("segments", ids).put("repeat", 1))
-        runCommand("Уборка комнат", "app_segment_clean", params)
+        runCommand("Уборка комнат", "app_segment_clean", params, stopFirst = true)
     }
 
     // ------------------------------------------------------------------
@@ -202,11 +202,11 @@ class XiaomiRepository(context: Context) {
     }
 
     private fun parseStatus(array: JSONArray): XiaomiStatus {
-        if (array.length() < 3) throw IllegalStateException("Короткий ответ get_status")
+        if (array.length() < 1) throw IllegalStateException("Пустой ответ get_status")
         return XiaomiStatus(
             state = array.optInt(0),
-            errorCode = array.optInt(1),
-            battery = array.optInt(2),
+            errorCode = if (array.length() > 1) array.optInt(1) else 0,
+            battery = if (array.length() > 2) array.optInt(2) else 0,
             cleanTimeSec = if (array.length() > 4) array.optInt(4) else 0,
             cleanAreaMm2 = if (array.length() > 5) array.optLong(5) else 0L,
         )
@@ -216,25 +216,37 @@ class XiaomiRepository(context: Context) {
         label: String,
         method: String,
         params: JSONArray = JSONArray(),
+        stopFirst: Boolean = false,
     ) {
         val cfg = config ?: return
         scope.launch {
             _busy.value = true
-            log("↑ $method $params")
             try {
+                if (stopFirst) {
+                    log("↑ app_stop (перед комнатой)")
+                    runCatching { client(cfg).command("app_stop") }
+                    delay(900)
+                }
+                log("↑ $method $params")
                 val local = runCatching { client(cfg).command(method, params) }
                 if (local.isSuccess) {
                     log("↓ локально: ${local.getOrNull()?.toString()?.take(160)}")
                 } else {
                     log("✗ локально: ${describe(local.exceptionOrNull()!!)}")
-                    val cloud = cloudCommand(method, params)
-                    if (cloud == null) {
-                        throw (local.exceptionOrNull() ?: IllegalStateException("нет связи"))
+                    if (stopFirst) {
+                        // The robot may start cleaning and not answer; don't
+                        // immediately jump to the cloud, just refresh status.
+                        log("… команда отправлена, ответа нет; проверяю статус")
+                    } else {
+                        val cloud = cloudCommand(method, params)
+                        if (cloud == null) {
+                            throw (local.exceptionOrNull() ?: IllegalStateException("нет связи"))
+                        }
+                        log("↓ облако: $cloud")
                     }
-                    log("↓ облако: $cloud")
                 }
                 _error.value = null
-                delay(700)
+                delay(1200)
                 loadStatus(cfg)
             } catch (e: Exception) {
                 _error.value = "$label: ${describe(e)}"
