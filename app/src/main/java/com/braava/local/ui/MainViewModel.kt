@@ -183,7 +183,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             repository.selected.collect { config ->
                 cloudDid = null
-                xiaomi.select(if (config?.kind == RobotKind.XIAOMI) config else null)
+                val xiaomiConfig = if (config?.kind == RobotKind.XIAOMI) config else null
+                xiaomi.select(xiaomiConfig)
+                val session = xiaomiSessionStore.load()
+                val token = xiaomiConfig?.token
+                if (session != null && !token.isNullOrBlank()) {
+                    val did = runCatching { XiaomiCloud().findDid(session, token) }.getOrNull()
+                    cloudDid = did
+                    xiaomi.setCloud(session, did)
+                } else {
+                    xiaomi.setCloud(null, null)
+                }
             }
         }
     }
@@ -295,6 +305,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun storeXiaomiSession(session: XiaomiCloud.Session) {
         xiaomiSessionStore.save(session)
         _xiaomiCloudReady.value = true
+        val config = repository.selected.value
+        if (config?.kind == RobotKind.XIAOMI && !config.token.isNullOrBlank()) {
+            viewModelScope.launch {
+                val did = runCatching { XiaomiCloud().findDid(session, config.token) }.getOrNull()
+                cloudDid = did
+                xiaomi.setCloud(session, did)
+            }
+        }
     }
 
     fun clearXiaomiCloudMessage() {

@@ -1,6 +1,7 @@
 package com.braava.local.data
 
 import android.content.Context
+import com.braava.local.data.cloud.XiaomiCloud
 import com.braava.local.data.xiaomi.MiioClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -12,6 +13,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import org.json.JSONArray
+import org.json.JSONObject
 
 /** Parsed `get_status` reply of a Xiaomi/Roborock vacuum. */
 data class XiaomiStatus(
@@ -51,20 +54,23 @@ data class XiaomiStatus(
 }
 
 /**
- * Local control of one Xiaomi vacuum over miIO (UDP 54321).
+ * Xiaomi vacuum control.
  *
- * Polling runs while a Xiaomi robot is selected; every command opens a short
- * miIO session, so no persistent connection is needed. The robot may be asleep
- * on the dock and not answer at all until it is woken (start a cleaning).
+ * Tries local miIO first (fast, no internet). When the phone is on a VPN or
+ * mobile data and the LAN is unreachable, the same command is sent through the
+ * Xiaomi cloud if a session is available. Status and room ids follow the same
+ * local-first / cloud-second rule.
  */
 class XiaomiRepository(context: Context) {
 
     private val appContext = context.applicationContext
     private val roomStore = XiaomiRoomStore(appContext)
-
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var pollJob: Job? = null
     private var config: RobotConfig? = null
+
+    private var cloudSession: XiaomiCloud.Session? = null
+    private var cloudDid: String? = null
 
     private val _status = MutableStateFlow<XiaomiStatus?>(null)
     val status: StateFlow<XiaomiStatus?> = _status.asStateFlow()
@@ -77,6 +83,11 @@ class XiaomiRepository(context: Context) {
 
     private val _busy = MutableStateFlow(false)
     val busy: StateFlow<Boolean> = _busy.asStateFlow()
+
+    fun setCloud(session: XiaomiCloud.Session?, did: String?) {
+        cloudSession = session
+        cloudDid = did
+    }
 
     /** Switches to [config] (null stops polling and clears the state). */
     fun select(config: RobotConfig?) {
@@ -102,7 +113,9 @@ class XiaomiRepository(context: Context) {
         scope.launch {
             _busy.value = true
             runCatching {
-                val array = client(cfg).roomMapping()
+                val array = runCatching { client(cfg).roomMapping() }.getOrNull()
+                    ?: cloudCommand("get_room_mapping")?.optJSONArray("result")
+                    ?: throw IllegalStateException("Комнаты не получены")
                 (0 until array.length()).mapNotNull { index ->
                     array.optJSONArray(index)?.optInt(0)?.takeIf { it > 0 }
                 }.distinct().sorted()
@@ -117,19 +130,21 @@ class XiaomiRepository(context: Context) {
         }
     }
 
-    fun start() = runCommand("Убрать") { it.start() }
+    fun start() = runCommand("Убрать", "app_start")
 
-    fun pause() = runCommand("Пауза") { it.pause() }
+    fun pause() = runCommand("Пауза", "app_pause")
 
-    fun stop() = runCommand("Стоп") { it.stop() }
+    fun stop() = runCommand("Стоп", "app_stop")
 
-    fun dock() = runCommand("Домой") { it.charge() }
+    fun dock() = runCommand("Домой", "app_charge")
 
-    fun find() = runCommand("Найти") { it.findMe() }
+    fun find() = runCommand("Найти", "find_me")
 
     fun cleanSegments(segments: List<Int>) {
         if (segments.isEmpty()) return
-        runCommand("Уборка комнат") { it.cleanSegments(segments) }
+        val ids = JSONArray().apply { segments.forEach { put(it) } }
+        val params = JSONArray().put(JSONObject().put("segments", ids).put("repeat", 1))
+        runCommand("Уборка комнат", "app_segment_clean", params)
     }
 
     // ------------------------------------------------------------------
@@ -155,8 +170,17 @@ class XiaomiRepository(context: Context) {
             }
     }
 
-    private fun fetchStatus(cfg: RobotConfig): XiaomiStatus {
-        val array = client(cfg).status()
+    private suspend fun fetchStatus(cfg: RobotConfig): XiaomiStatus {
+        val local = runCatching { parseStatus(client(cfg).status()) }.getOrNull()
+        if (local != null) return local
+        val cloud = cloudCommand("get_status")?.optJSONArray("result")
+            ?: throw IllegalStateException(
+                "Робот не отвечает ни по Wi-Fi, ни через облако",
+            )
+        return parseStatus(cloud)
+    }
+
+    private fun parseStatus(array: JSONArray): XiaomiStatus {
         if (array.length() < 6) throw IllegalStateException("Короткий ответ get_status")
         return XiaomiStatus(
             state = array.optInt(0),
@@ -167,12 +191,21 @@ class XiaomiRepository(context: Context) {
         )
     }
 
-    private fun runCommand(label: String, block: (MiioClient) -> Unit) {
+    private fun runCommand(
+        label: String,
+        method: String,
+        params: JSONArray = JSONArray(),
+    ) {
         val cfg = config ?: return
         scope.launch {
             _busy.value = true
             try {
-                block(client(cfg))
+                val local = runCatching { client(cfg).command(method, params) }
+                if (local.isFailure) {
+                    val cloud = cloudCommand(method, params)
+                        ?: throw (local.exceptionOrNull() ?: IllegalStateException("нет связи"))
+                    if (cloud.has("error")) throw IllegalStateException("Облако: ${cloud.optJSONObject("error")}")
+                }
                 _error.value = null
                 delay(700)
                 loadStatus(cfg)
@@ -182,6 +215,17 @@ class XiaomiRepository(context: Context) {
                 _busy.value = false
             }
         }
+    }
+
+    private suspend fun cloudCommand(
+        method: String,
+        params: JSONArray = JSONArray(),
+    ): JSONObject? {
+        val session = cloudSession ?: return null
+        val did = cloudDid ?: return null
+        return runCatching {
+            XiaomiCloud().sendCommand(session, did, method, params)
+        }.getOrNull()
     }
 
     private fun client(cfg: RobotConfig): MiioClient {
@@ -194,14 +238,25 @@ class XiaomiRepository(context: Context) {
         )
     }
 
-    private fun describe(error: Throwable): String =
-        generateSequence(error as Throwable?) { it.cause }
+    private fun describe(error: Throwable): String {
+        val text = generateSequence(error as Throwable?) { it.cause }
             .mapNotNull { it.message?.takeIf { message -> message.isNotBlank() } }
             .distinct()
             .joinToString(" → ")
-            .ifBlank { error.javaClass.simpleName }
+        if (text.isBlank()) return error.javaClass.simpleName
+        val hint = if (text.contains("EPERM", ignoreCase = true)) {
+            " (локальная сеть заблокирована: VPN/сотовая/LNP)"
+        } else if (text.contains("timed out", ignoreCase = true) ||
+            text.contains("timeout", ignoreCase = true)
+        ) {
+            " (робот спит или недоступен по Wi-Fi)"
+        } else {
+            ""
+        }
+        return text + hint
+    }
 
     private companion object {
-        const val POLL_MS = 3000L
+        const val POLL_MS = 5000L
     }
 }
