@@ -59,7 +59,8 @@ data class XiaomiStatus(
  */
 class XiaomiRepository(context: Context) {
 
-    private val roomStore = XiaomiRoomStore(context.applicationContext)
+    private val appContext = context.applicationContext
+    private val roomStore = XiaomiRoomStore(appContext)
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var pollJob: Job? = null
@@ -186,7 +187,11 @@ class XiaomiRepository(context: Context) {
     private fun client(cfg: RobotConfig): MiioClient {
         val token = cfg.token
         if (token.isNullOrBlank()) throw IllegalStateException("У робота нет miIO-токена")
-        return MiioClient(cfg.ip.trim(), token.trim())
+        return MiioClient(
+            cfg.ip.trim(),
+            token.trim(),
+            network = LocalNetwork.wifi(appContext),
+        )
     }
 
     private fun describe(error: Throwable): String =

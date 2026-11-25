@@ -47,7 +47,14 @@ object NetworkDiagnostics {
         lines += "IP телефона: ${address?.hostAddress ?: "—"}"
         lines += "VPN: ${if (caps?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true) "включён" else "нет"}"
         lines += "Разрешение «Устройства рядом»: ${nearby(context)}"
-        lines += udpTest(ip)
+        val wifi = LocalNetwork.wifi(context)
+        if (wifi == null) {
+            lines += "⚠ Wi-Fi не найден: команды пойдут через мобильную сеть/VPN и не дойдут"
+        }
+        if (caps?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true) {
+            lines += "⚠ VPN включён — локальная сеть может блокироваться"
+        }
+        lines += udpTest(ip, wifi)
         lines
     }
 
@@ -60,7 +67,7 @@ object NetworkDiagnostics {
         return if (granted) "разрешено" else "НЕ разрешено"
     }
 
-    private fun udpTest(ip: String): String {
+    private fun udpTest(ip: String, network: android.net.Network?): String {
         val hello = ByteArray(32).apply {
             this[0] = 0x21.toByte()
             this[1] = 0x31.toByte()
@@ -70,6 +77,7 @@ object NetworkDiagnostics {
         }
         return try {
             DatagramSocket().use { socket ->
+                LocalNetwork.bind(socket, network)
                 socket.soTimeout = 2000
                 socket.send(DatagramPacket(hello, hello.size, InetAddress.getByName(ip), 54321))
                 val buffer = ByteArray(64)

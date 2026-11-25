@@ -3,6 +3,7 @@ package com.braava.local.data.xiaomi
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import com.braava.local.data.LocalNetwork
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.net.DatagramPacket
@@ -24,6 +25,7 @@ object MiioDiscovery {
     suspend fun discover(context: Context, timeoutMs: Long = 4000): List<Found> =
         withContext(Dispatchers.IO) {
             val socket = DatagramSocket()
+            LocalNetwork.bind(socket, LocalNetwork.wifi(context))
             socket.broadcast = true
             socket.soTimeout = 700
             val hello = ByteArray(32).apply {

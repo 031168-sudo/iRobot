@@ -1,5 +1,7 @@
 package com.braava.local.data.xiaomi
 
+import android.net.Network
+import com.braava.local.data.LocalNetwork
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.DatagramPacket
@@ -23,6 +25,7 @@ class MiioClient(
     private val ip: String,
     private val token: String,
     private val timeoutMs: Int = 4000,
+    private val network: Network? = null,
 ) {
 
     class MiioException(message: String) : Exception(message)
@@ -125,6 +128,7 @@ class MiioClient(
 
     private fun exchange(packet: ByteArray, timeout: Int): ByteArray {
         DatagramSocket().use { socket ->
+            LocalNetwork.bind(socket, network)
             socket.soTimeout = timeout
             val target = InetAddress.getByName(ip)
             socket.send(DatagramPacket(packet, packet.size, target, PORT))
