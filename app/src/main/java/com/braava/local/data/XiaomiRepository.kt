@@ -202,6 +202,18 @@ class XiaomiRepository(context: Context) {
     }
 
     private fun parseStatus(array: JSONArray): XiaomiStatus {
+        // m1s (both locally and via cloud) returns [{"state":..., "battery":...}],
+        // older models return a plain array of numbers.
+        val obj = array.optJSONObject(0)
+        if (obj != null) {
+            return XiaomiStatus(
+                state = obj.optInt("state"),
+                errorCode = obj.optInt("error_code"),
+                battery = obj.optInt("battery"),
+                cleanTimeSec = obj.optInt("clean_time") * 60,
+                cleanAreaMm2 = obj.optLong("clean_area") * 100,
+            )
+        }
         if (array.length() < 1) throw IllegalStateException("Пустой ответ get_status")
         return XiaomiStatus(
             state = array.optInt(0),

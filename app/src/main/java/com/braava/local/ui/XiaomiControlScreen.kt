@@ -233,11 +233,9 @@ fun XiaomiControlScreen(
                             TextButton(onClick = { viewModel.xiaomiClean(listOf(id)) }) {
                                 Text("Убрать")
                             }
-                            if (cloudReady) {
-                                TextButton(onClick = { viewModel.xiaomiCloudClean(listOf(id)) }) {
-                                    Text("Облако")
-                                }
-                            }
+                            // Cloud room cleaning is not supported by the CN
+                            // RPC for this model yet (data for segment error);
+                            // use the local button or a full cloud clean.
                         }
                     }
                 }
