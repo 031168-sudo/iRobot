@@ -67,11 +67,13 @@ fun XiaomiControlScreen(
     val busy by viewModel.xiaomiBusy.collectAsStateWithLifecycle()
     val cloudReady by viewModel.xiaomiCloudReady.collectAsStateWithLifecycle()
     val cloudMessage by viewModel.xiaomiCloudMessage.collectAsStateWithLifecycle()
+    val commandLog by viewModel.xiaomiLog.collectAsStateWithLifecycle()
 
     var roomsLoaded by remember { mutableStateOf(false) }
     var ipDialogOpen by remember { mutableStateOf(false) }
     var ipDraft by remember { mutableStateOf(config.ip) }
     var diagnosticsOpen by remember { mutableStateOf(false) }
+    var logOpen by remember { mutableStateOf(false) }
     var diagnosticsLines by remember { mutableStateOf<List<String>>(emptyList()) }
     var foundOpen by remember { mutableStateOf(false) }
     var searching by remember { mutableStateOf(false) }
@@ -258,6 +260,9 @@ fun XiaomiControlScreen(
             }) {
                 Text("Изменить IP")
             }
+            TextButton(onClick = { logOpen = true }) {
+                Text("Журнал команд")
+            }
             TextButton(
                 onClick = {
                     searching = true
@@ -271,6 +276,30 @@ fun XiaomiControlScreen(
                 Text(if (searching) "Ищу miIO-устройства…" else "Найти робота в сети")
             }
         }
+    }
+
+    if (logOpen) {
+        AlertDialog(
+            onDismissRequest = { logOpen = false },
+            confirmButton = {
+                TextButton(onClick = { logOpen = false }) { Text("Закрыть") }
+            },
+            title = { Text("Журнал команд") },
+            text = {
+                Column(
+                    Modifier
+                        .height(420.dp)
+                        .verticalScroll(rememberScrollState()),
+                ) {
+                    if (commandLog.isEmpty()) {
+                        Text("Пока пусто", style = MaterialTheme.typography.bodySmall)
+                    }
+                    commandLog.forEach { line ->
+                        Text(line, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            },
+        )
     }
 
     if (foundOpen) {

@@ -15,6 +15,9 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /** Parsed `get_status` reply of a Xiaomi/Roborock vacuum. */
 data class XiaomiStatus(
@@ -84,6 +87,9 @@ class XiaomiRepository(context: Context) {
     private val _busy = MutableStateFlow(false)
     val busy: StateFlow<Boolean> = _busy.asStateFlow()
 
+    private val _log = MutableStateFlow<List<String>>(emptyList())
+    val log: StateFlow<List<String>> = _log.asStateFlow()
+
     fun setCloud(session: XiaomiCloud.Session?, did: String?) {
         cloudSession = session
         cloudDid = did
@@ -123,8 +129,10 @@ class XiaomiRepository(context: Context) {
                 _rooms.value = it
                 roomStore.save(cfg.blid, it)
                 _error.value = null
+                log("↓ комнаты: ${it.joinToString(",")}")
             }.onFailure {
                 _error.value = describe(it)
+                log("✗ комнаты: ${describe(it)}")
             }
             _busy.value = false
         }
@@ -149,6 +157,11 @@ class XiaomiRepository(context: Context) {
 
     // ------------------------------------------------------------------
 
+    private fun log(line: String) {
+        val stamp = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date())
+        _log.value = (_log.value + "$stamp  $line").takeLast(50)
+    }
+
     private fun startPolling() {
         pollJob = scope.launch {
             while (isActive) {
@@ -167,6 +180,7 @@ class XiaomiRepository(context: Context) {
             }
             .onFailure {
                 _error.value = describe(it)
+                log("✗ статус: ${describe(it)}")
             }
     }
 
@@ -199,18 +213,25 @@ class XiaomiRepository(context: Context) {
         val cfg = config ?: return
         scope.launch {
             _busy.value = true
+            log("↑ $method $params")
             try {
                 val local = runCatching { client(cfg).command(method, params) }
-                if (local.isFailure) {
+                if (local.isSuccess) {
+                    log("↓ локально: ${local.getOrNull()?.toString()?.take(160)}")
+                } else {
+                    log("✗ локально: ${describe(local.exceptionOrNull()!!)}")
                     val cloud = cloudCommand(method, params)
-                        ?: throw (local.exceptionOrNull() ?: IllegalStateException("нет связи"))
-                    if (cloud.has("error")) throw IllegalStateException("Облако: ${cloud.optJSONObject("error")}")
+                    if (cloud == null) {
+                        throw (local.exceptionOrNull() ?: IllegalStateException("нет связи"))
+                    }
+                    log("↓ облако: $cloud")
                 }
                 _error.value = null
                 delay(700)
                 loadStatus(cfg)
             } catch (e: Exception) {
                 _error.value = "$label: ${describe(e)}"
+                log("✗ $label: ${describe(e)}")
             } finally {
                 _busy.value = false
             }
@@ -225,6 +246,8 @@ class XiaomiRepository(context: Context) {
         val did = cloudDid ?: return null
         return runCatching {
             XiaomiCloud().sendCommand(session, did, method, params)
+        }.onFailure {
+            log("✗ облако: ${describe(it)}")
         }.getOrNull()
     }
 

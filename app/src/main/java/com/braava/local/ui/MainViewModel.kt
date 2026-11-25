@@ -47,6 +47,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val xiaomiRooms = xiaomi.rooms
     val xiaomiError = xiaomi.error
     val xiaomiBusy = xiaomi.busy
+    val xiaomiLog = xiaomi.log
 
     private val _xiaomiDevices = MutableStateFlow<List<XiaomiCloud.XiaomiDevice>>(emptyList())
     val xiaomiDevices = _xiaomiDevices.asStateFlow()
