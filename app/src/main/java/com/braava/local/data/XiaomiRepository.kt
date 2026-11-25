@@ -151,8 +151,18 @@ class XiaomiRepository(context: Context) {
     fun cleanSegments(segments: List<Int>) {
         if (segments.isEmpty()) return
         val ids = JSONArray().apply { segments.forEach { put(it) } }
-        val params = JSONArray().put(JSONObject().put("segments", ids).put("repeat", 1))
-        runCommand("Уборка комнат", "app_segment_clean", params, stopFirst = true)
+        val localParams = JSONArray().put(
+            JSONObject().put("segments", ids).put("repeat", 1),
+        )
+        // The CN cloud wants a plain array of segment ids: [17].
+        val cloudParams = JSONArray().apply { segments.forEach { put(it) } }
+        runCommand(
+            "Уборка комнат",
+            "app_segment_clean",
+            localParams,
+            stopFirst = true,
+            cloudParams = cloudParams,
+        )
     }
 
     // ------------------------------------------------------------------
@@ -229,6 +239,7 @@ class XiaomiRepository(context: Context) {
         method: String,
         params: JSONArray = JSONArray(),
         stopFirst: Boolean = false,
+        cloudParams: JSONArray? = null,
     ) {
         val cfg = config ?: return
         scope.launch {
@@ -245,17 +256,14 @@ class XiaomiRepository(context: Context) {
                     log("↓ локально: ${local.getOrNull()?.toString()?.take(160)}")
                 } else {
                     log("✗ локально: ${describe(local.exceptionOrNull()!!)}")
-                    if (stopFirst) {
-                        // The robot may start cleaning and not answer; don't
-                        // immediately jump to the cloud, just refresh status.
-                        log("… команда отправлена, ответа нет; проверяю статус")
-                    } else {
-                        val cloud = cloudCommand(method, params)
-                        if (cloud == null) {
-                            throw (local.exceptionOrNull() ?: IllegalStateException("нет связи"))
-                        }
-                        log("↓ облако: $cloud")
+                    // Local miIO is unreliable on this robot, so fall back to
+                    // the cloud for every command (with the cloud-specific
+                    // params for room cleaning).
+                    val cloud = cloudCommand(method, cloudParams ?: params)
+                    if (cloud == null) {
+                        throw (local.exceptionOrNull() ?: IllegalStateException("нет связи"))
                     }
+                    log("↓ облако: $cloud")
                 }
                 _error.value = null
                 delay(1200)
