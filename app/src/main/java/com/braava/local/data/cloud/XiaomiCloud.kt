@@ -223,26 +223,11 @@ class XiaomiCloud(
         segments: List<Int>,
         repeat: Int = 1,
     ): JSONObject = withContext(Dispatchers.IO) {
-        val ids = JSONArray().apply { segments.forEach { put(it) } }
-        val arrayParams = JSONArray().put(
-            JSONObject().put("segments", ids).put("repeat", repeat),
-        )
-        try {
-            sendCommand(session, did, "app_segment_clean", arrayParams)
-        } catch (e: CloudException) {
-            // The Mi Home cloud has been seen to reject the array form with
-            // "data for segment is not a number"; retry with a bare object.
-            if (e.message?.contains("segment", ignoreCase = true) == true) {
-                sendCommandValue(
-                    session,
-                    did,
-                    "app_segment_clean",
-                    JSONObject().put("segments", ids).put("repeat", repeat),
-                )
-            } else {
-                throw e
-            }
-        }
+        // The CN cloud RPC takes the segment ids as a plain array: [16, 17].
+        // Wrapping them into [{"segments":[...],"repeat":1}] makes the robot
+        // answer "data for segment is not a number".
+        val params = JSONArray().apply { segments.forEach { put(it) } }
+        sendCommand(session, did, "app_segment_clean", params)
     }
 
     suspend fun sendCommand(
