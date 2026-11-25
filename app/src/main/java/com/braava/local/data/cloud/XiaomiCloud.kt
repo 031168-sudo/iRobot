@@ -102,7 +102,12 @@ class XiaomiCloud(
     ): LoginResult = withContext(Dispatchers.IO) {
         val client = challenge.client
         val jar = challenge.jar
-        val headers = mapOf("Content-Type" to "application/x-www-form-urlencoded")
+        // Every 2FA hop answers with a Location header; following redirects
+        // would hide it, so this chain is walked manually (like the extractor).
+        val noRedirect = client.newBuilder()
+            .followRedirects(false)
+            .followSslRedirects(false)
+            .build()
 
         val verifyUrl = "https://account.xiaomi.com/identity/auth/verifyEmail"
             .toHttpUrl().newBuilder()
@@ -120,7 +125,7 @@ class XiaomiCloud(
             .add("_json", "true")
             .add("ick", jar.find("ick")?.value.orEmpty())
             .build()
-        val verify = client.newCall(
+        val verify = noRedirect.newCall(
             Request.Builder().url(verifyUrl).post(verifyBody).build(),
         ).execute().use { response ->
             if (response.code != 200) {
@@ -141,7 +146,7 @@ class XiaomiCloud(
                 .addQueryParameter("context", challenge.context)
                 .addQueryParameter("_locale", "en_US")
                 .build()
-            val hop = client.newCall(
+            val hop = noRedirect.newCall(
                 Request.Builder().url(fallbackUrl).build(),
             ).execute().use { it.header("Location") }
             finish = hop
@@ -152,20 +157,20 @@ class XiaomiCloud(
         val finishUrl = finish
 
         val endUrl = if (finishUrl.contains("identity/result/check")) {
-            client.newCall(Request.Builder().url(finishUrl).build()).execute().use {
+            noRedirect.newCall(Request.Builder().url(finishUrl).build()).execute().use {
                 it.header("Location")
             }
         } else {
             finishUrl
         } ?: throw CloudException("2FA: нет Auth2/end")
 
-        var end = client.newCall(
+        var end = noRedirect.newCall(
             Request.Builder().url(endUrl).build(),
         ).execute()
         var endText = end.use { it.body?.string().orEmpty() }
         var pragma = end.header("extension-pragma")
         if (end.code == 200 && endText.contains("Xiaomi Account - Tips")) {
-            end = client.newCall(Request.Builder().url(endUrl).build()).execute()
+            end = noRedirect.newCall(Request.Builder().url(endUrl).build()).execute()
             endText = end.use { it.body?.string().orEmpty() }
             pragma = end.header("extension-pragma")
         }
