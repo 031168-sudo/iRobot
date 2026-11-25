@@ -7,7 +7,7 @@ Android-приложение для **локального управления 
 Пакет `com.braava.local`, Kotlin + Jetpack Compose.
 
 - **Репозиторий:** https://github.com/031168-sudo/iRobot
-- **Текущая версия:** 2.29 (`versionCode 40`), ветка `master`.
+- **Текущая версия:** 2.30 (`versionCode 41`), ветка `master`.
 - **Актуальное состояние и передача:** `HANDOFF.md`.
 - **Детали протокола и телеметрии:** `SESSION.md`.
 
