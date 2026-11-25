@@ -185,8 +185,15 @@ class XiaomiRepository(context: Context) {
     }
 
     private suspend fun fetchStatus(cfg: RobotConfig): XiaomiStatus {
-        val local = runCatching { parseStatus(client(cfg).status()) }.getOrNull()
-        if (local != null) return local
+        val localJson = runCatching { client(cfg).command("get_status") }.getOrNull()
+        if (localJson != null) {
+            log("↓ статус: ${localJson.toString().take(300)}")
+            val array = localJson.optJSONArray("result")
+            if (array != null) {
+                val parsed = runCatching { parseStatus(array) }.getOrNull()
+                if (parsed != null) return parsed
+            }
+        }
         val cloud = cloudCommand("get_status")?.optJSONArray("result")
             ?: throw IllegalStateException(
                 "Робот не отвечает ни по Wi-Fi, ни через облако",
@@ -195,13 +202,13 @@ class XiaomiRepository(context: Context) {
     }
 
     private fun parseStatus(array: JSONArray): XiaomiStatus {
-        if (array.length() < 6) throw IllegalStateException("Короткий ответ get_status")
+        if (array.length() < 3) throw IllegalStateException("Короткий ответ get_status")
         return XiaomiStatus(
             state = array.optInt(0),
             errorCode = array.optInt(1),
             battery = array.optInt(2),
-            cleanTimeSec = array.optInt(4),
-            cleanAreaMm2 = array.optLong(5),
+            cleanTimeSec = if (array.length() > 4) array.optInt(4) else 0,
+            cleanAreaMm2 = if (array.length() > 5) array.optLong(5) else 0L,
         )
     }
 
