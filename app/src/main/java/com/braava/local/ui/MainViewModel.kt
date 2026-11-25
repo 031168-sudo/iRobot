@@ -8,6 +8,7 @@ import com.braava.local.data.CloudCredentialStore
 import com.braava.local.data.ConnectionDiagnostics
 import com.braava.local.data.RobotConfig
 import com.braava.local.data.RobotKind
+import com.braava.local.data.XiaomiRoomNameStore
 import com.braava.local.data.XiaomiSessionStore
 import com.braava.local.data.cloud.IrobotCloud
 import com.braava.local.data.cloud.LocalPasswordFetcher
@@ -53,6 +54,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val xiaomiDevices = _xiaomiDevices.asStateFlow()
 
     private val xiaomiSessionStore = XiaomiSessionStore(application.applicationContext)
+    private val xiaomiRoomNameStore = XiaomiRoomNameStore(application.applicationContext)
     private var pendingChallenge: XiaomiCloud.Challenge? = null
     private var cloudDid: String? = null
 
@@ -64,6 +66,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _xiaomiCloudMessage = MutableStateFlow<String?>(null)
     val xiaomiCloudMessage = _xiaomiCloudMessage.asStateFlow()
+
+    private val _xiaomiRoomNames = MutableStateFlow<Map<Int, String>>(emptyMap())
+    val xiaomiRoomNames = _xiaomiRoomNames.asStateFlow()
 
     private val _busy = MutableStateFlow(false)
     val busy = _busy.asStateFlow()
@@ -185,6 +190,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             repository.selected.collect { config ->
                 cloudDid = null
                 val xiaomiConfig = if (config?.kind == RobotKind.XIAOMI) config else null
+                _xiaomiRoomNames.value = xiaomiConfig?.let {
+                    xiaomiRoomNameStore.load(it.blid)
+                } ?: emptyMap()
                 xiaomi.select(xiaomiConfig)
                 val session = xiaomiSessionStore.load()
                 val token = xiaomiConfig?.token
@@ -441,6 +449,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun xiaomiFind() = xiaomi.find()
 
     fun xiaomiClean(segments: List<Int>) = xiaomi.cleanSegments(segments)
+
+    fun xiaomiRenameRoom(segment: Int, name: String) {
+        val config = repository.selected.value ?: return
+        val updated = _xiaomiRoomNames.value.toMutableMap()
+        if (name.isBlank()) updated.remove(segment) else updated[segment] = name.trim()
+        _xiaomiRoomNames.value = updated
+        xiaomiRoomNameStore.save(config.blid, updated)
+    }
 
     // ----- cloud -----
 

@@ -1,5 +1,6 @@
 package com.braava.local.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -68,12 +69,15 @@ fun XiaomiControlScreen(
     val cloudReady by viewModel.xiaomiCloudReady.collectAsStateWithLifecycle()
     val cloudMessage by viewModel.xiaomiCloudMessage.collectAsStateWithLifecycle()
     val commandLog by viewModel.xiaomiLog.collectAsStateWithLifecycle()
+    val roomNames by viewModel.xiaomiRoomNames.collectAsStateWithLifecycle()
 
     var roomsLoaded by remember { mutableStateOf(false) }
     var ipDialogOpen by remember { mutableStateOf(false) }
     var ipDraft by remember { mutableStateOf(config.ip) }
     var diagnosticsOpen by remember { mutableStateOf(false) }
     var logOpen by remember { mutableStateOf(false) }
+    var renameSegment by remember { mutableStateOf<Int?>(null) }
+    var renameDraft by remember { mutableStateOf("") }
     var diagnosticsLines by remember { mutableStateOf<List<String>>(emptyList()) }
     var foundOpen by remember { mutableStateOf(false) }
     var searching by remember { mutableStateOf(false) }
@@ -202,8 +206,8 @@ fun XiaomiControlScreen(
             Text("Комнаты", style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(4.dp))
             Text(
-                "ID комнат приходят с робота (get_room_mapping). " +
-                    "Имена комнат хранятся в облаке Xiaomi и локально недоступны.",
+                "Нажмите на название комнаты, чтобы переименовать. " +
+                    "ID приходят с робота, имена хранятся только в приложении.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -229,7 +233,15 @@ fun XiaomiControlScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.fillMaxWidth(),
                         ) {
-                            Text("Комната $id", modifier = Modifier.weight(1f))
+                            Text(
+                                roomNames[id] ?: "Комната $id",
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clickable {
+                                        renameSegment = id
+                                        renameDraft = roomNames[id] ?: ""
+                                    },
+                            )
                             TextButton(onClick = { viewModel.xiaomiClean(listOf(id)) }) {
                                 Text("Убрать")
                             }
@@ -276,6 +288,32 @@ fun XiaomiControlScreen(
                 Text(if (searching) "Ищу miIO-устройства…" else "Найти робота в сети")
             }
         }
+    }
+
+    val editingSegment = renameSegment
+    if (editingSegment != null) {
+        AlertDialog(
+            onDismissRequest = { renameSegment = null },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.xiaomiRenameRoom(editingSegment, renameDraft)
+                    renameSegment = null
+                }) { Text("Сохранить") }
+            },
+            dismissButton = {
+                TextButton(onClick = { renameSegment = null }) { Text("Отмена") }
+            },
+            title = { Text("Название комнаты $editingSegment") },
+            text = {
+                OutlinedTextField(
+                    value = renameDraft,
+                    onValueChange = { renameDraft = it },
+                    label = { Text("Название") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            },
+        )
     }
 
     if (logOpen) {
