@@ -15,6 +15,6 @@ class BraavaApp : Application() {
     override fun onCreate() {
         super.onCreate()
         repository = RobotRepository(this)
-        xiaomi = XiaomiRepository()
+        xiaomi = XiaomiRepository(this)
     }
 }

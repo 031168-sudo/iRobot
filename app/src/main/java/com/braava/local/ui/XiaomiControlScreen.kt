@@ -65,6 +65,8 @@ fun XiaomiControlScreen(
     val rooms by viewModel.xiaomiRooms.collectAsStateWithLifecycle()
     val error by viewModel.xiaomiError.collectAsStateWithLifecycle()
     val busy by viewModel.xiaomiBusy.collectAsStateWithLifecycle()
+    val cloudReady by viewModel.xiaomiCloudReady.collectAsStateWithLifecycle()
+    val cloudMessage by viewModel.xiaomiCloudMessage.collectAsStateWithLifecycle()
 
     var roomsLoaded by remember { mutableStateOf(false) }
     var ipDialogOpen by remember { mutableStateOf(false) }
@@ -167,6 +169,34 @@ fun XiaomiControlScreen(
             }
 
             Spacer(Modifier.height(20.dp))
+            Text("Облако", style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(4.dp))
+            if (cloudReady) {
+                OutlinedButton(onClick = { viewModel.xiaomiCloudStart() }) {
+                    Text("Убрать через облако")
+                }
+                Text(
+                    "Нужно, когда робот спит на базе. Команда идёт через серверы Xiaomi.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                cloudMessage?.let { message ->
+                    Spacer(Modifier.height(6.dp))
+                    Text(message, style = MaterialTheme.typography.bodySmall)
+                    TextButton(onClick = { viewModel.clearXiaomiCloudMessage() }) {
+                        Text("Скрыть")
+                    }
+                }
+            } else {
+                Text(
+                    "Облако не подключено. Войдите в Mi-аккаунт во вкладке Xiaomi " +
+                        "(код на почту), чтобы запускать робота с базы.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            Spacer(Modifier.height(20.dp))
             Text("Комнаты", style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(4.dp))
             Text(
@@ -200,6 +230,11 @@ fun XiaomiControlScreen(
                             Text("Комната $id", modifier = Modifier.weight(1f))
                             TextButton(onClick = { viewModel.xiaomiClean(listOf(id)) }) {
                                 Text("Убрать")
+                            }
+                            if (cloudReady) {
+                                TextButton(onClick = { viewModel.xiaomiCloudClean(listOf(id)) }) {
+                                    Text("Облако")
+                                }
                             }
                         }
                     }

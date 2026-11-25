@@ -1,5 +1,6 @@
 package com.braava.local.data
 
+import android.content.Context
 import com.braava.local.data.xiaomi.MiioClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -56,7 +57,9 @@ data class XiaomiStatus(
  * miIO session, so no persistent connection is needed. The robot may be asleep
  * on the dock and not answer at all until it is woken (start a cleaning).
  */
-class XiaomiRepository {
+class XiaomiRepository(context: Context) {
+
+    private val roomStore = XiaomiRoomStore(context.applicationContext)
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var pollJob: Job? = null
@@ -83,7 +86,7 @@ class XiaomiRepository {
         this.config = config
         pollJob?.cancel()
         _status.value = null
-        _rooms.value = emptyList()
+        _rooms.value = config?.let { roomStore.load(it.blid) } ?: emptyList()
         _error.value = null
         if (config != null) startPolling()
     }
@@ -104,6 +107,7 @@ class XiaomiRepository {
                 }.distinct().sorted()
             }.onSuccess {
                 _rooms.value = it
+                roomStore.save(cfg.blid, it)
                 _error.value = null
             }.onFailure {
                 _error.value = describe(it)

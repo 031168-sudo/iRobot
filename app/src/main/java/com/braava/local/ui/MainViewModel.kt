@@ -8,6 +8,7 @@ import com.braava.local.data.CloudCredentialStore
 import com.braava.local.data.ConnectionDiagnostics
 import com.braava.local.data.RobotConfig
 import com.braava.local.data.RobotKind
+import com.braava.local.data.XiaomiSessionStore
 import com.braava.local.data.cloud.IrobotCloud
 import com.braava.local.data.cloud.LocalPasswordFetcher
 import com.braava.local.data.cloud.XiaomiCloud
@@ -17,6 +18,7 @@ import com.braava.local.data.model.CloudRegion
 import com.braava.local.data.model.CloudRoom
 import com.braava.local.data.model.MissionEntry
 import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
@@ -48,6 +50,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _xiaomiDevices = MutableStateFlow<List<XiaomiCloud.XiaomiDevice>>(emptyList())
     val xiaomiDevices = _xiaomiDevices.asStateFlow()
+
+    private val xiaomiSessionStore = XiaomiSessionStore(application.applicationContext)
+    private var pendingChallenge: XiaomiCloud.Challenge? = null
+    private var cloudDid: String? = null
+
+    private val _xiaomiNeedCode = MutableStateFlow(false)
+    val xiaomiNeedCode = _xiaomiNeedCode.asStateFlow()
+
+    private val _xiaomiCloudReady = MutableStateFlow(false)
+    val xiaomiCloudReady = _xiaomiCloudReady.asStateFlow()
+
+    private val _xiaomiCloudMessage = MutableStateFlow<String?>(null)
+    val xiaomiCloudMessage = _xiaomiCloudMessage.asStateFlow()
 
     private val _busy = MutableStateFlow(false)
     val busy = _busy.asStateFlow()
@@ -163,9 +178,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         // Auto-connect once the repository (and its listener) is fully built.
+        _xiaomiCloudReady.value = xiaomiSessionStore.load() != null
         if (repository.selected.value != null) repository.connect()
         viewModelScope.launch {
             repository.selected.collect { config ->
+                cloudDid = null
                 xiaomi.select(if (config?.kind == RobotKind.XIAOMI) config else null)
             }
         }
@@ -219,13 +236,123 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _busy.value = true
         viewModelScope.launch {
             try {
-                val devices = XiaomiCloud().fetchDevices(login.trim(), password)
-                _xiaomiDevices.value = devices
-                if (devices.isEmpty()) {
-                    _error.value = "В аккаунте нет устройств с miIO-токеном"
+                when (val result = XiaomiCloud().startLogin(login.trim(), password)) {
+                    is XiaomiCloud.LoginResult.Devices -> {
+                        storeXiaomiSession(result.session)
+                        _xiaomiDevices.value = result.devices
+                        pendingChallenge = null
+                        _xiaomiNeedCode.value = false
+                        if (result.devices.isEmpty()) {
+                            _error.value = "В аккаунте нет устройств с miIO-токеном"
+                        }
+                    }
+                    is XiaomiCloud.LoginResult.NeedCode -> {
+                        pendingChallenge = result.challenge
+                        _xiaomiNeedCode.value = true
+                        _error.value = "Код отправлен на почту — введите его ниже"
+                    }
                 }
             } catch (e: Exception) {
                 _error.value = e.message ?: "Ошибка входа в Mi-аккаунт"
+            } finally {
+                _busy.value = false
+            }
+        }
+    }
+
+    fun xiaomiSubmitCode(code: String) {
+        val challenge = pendingChallenge ?: return
+        if (code.isBlank()) {
+            _error.value = "Введите код из письма"
+            return
+        }
+        _busy.value = true
+        viewModelScope.launch {
+            try {
+                when (val result = challenge.submit(code.trim())) {
+                    is XiaomiCloud.LoginResult.Devices -> {
+                        storeXiaomiSession(result.session)
+                        _xiaomiDevices.value = result.devices
+                        pendingChallenge = null
+                        _xiaomiNeedCode.value = false
+                    }
+                    is XiaomiCloud.LoginResult.NeedCode -> {
+                        pendingChallenge = result.challenge
+                    }
+                }
+            } catch (e: Exception) {
+                _error.value = e.message ?: "Код не принят"
+            } finally {
+                _busy.value = false
+            }
+        }
+    }
+
+    private fun storeXiaomiSession(session: XiaomiCloud.Session) {
+        xiaomiSessionStore.save(session)
+        _xiaomiCloudReady.value = true
+    }
+
+    fun clearXiaomiCloudMessage() {
+        _xiaomiCloudMessage.value = null
+    }
+
+    private suspend fun resolveCloudDid(
+        cloud: XiaomiCloud,
+        session: XiaomiCloud.Session,
+    ): String {
+        cloudDid?.let { return it }
+        val token = repository.selected.value?.token?.trim()
+        if (token.isNullOrBlank()) throw IllegalStateException("У робота нет токена")
+        val did = cloud.findDid(session, token)
+            ?: throw IllegalStateException("Робот не найден в Mi-аккаунте")
+        cloudDid = did
+        return did
+    }
+
+    fun xiaomiCloudStart() {
+        val session = xiaomiSessionStore.load()
+        if (session == null) {
+            _error.value = "Сначала войдите в Mi-аккаунт"
+            return
+        }
+        _busy.value = true
+        viewModelScope.launch {
+            try {
+                val cloud = XiaomiCloud()
+                val did = resolveCloudDid(cloud, session)
+                cloud.start(session, did)
+                _xiaomiCloudMessage.value = "Уборка запущена через облако"
+                delay(1500)
+                xiaomi.refresh()
+            } catch (e: Exception) {
+                _xiaomiCloudMessage.value = null
+                _error.value = e.message ?: "Облачная команда не прошла"
+            } finally {
+                _busy.value = false
+            }
+        }
+    }
+
+    fun xiaomiCloudClean(segments: List<Int>) {
+        if (segments.isEmpty()) return
+        val session = xiaomiSessionStore.load()
+        if (session == null) {
+            _error.value = "Сначала войдите в Mi-аккаунт"
+            return
+        }
+        _busy.value = true
+        viewModelScope.launch {
+            try {
+                val cloud = XiaomiCloud()
+                val did = resolveCloudDid(cloud, session)
+                cloud.cleanSegments(session, did, segments)
+                _xiaomiCloudMessage.value = "Комната запущена через облако"
+                delay(1500)
+                xiaomi.refresh()
+            } catch (e: Exception) {
+                _xiaomiCloudMessage.value = null
+                _error.value = e.message ?: "Облачная команда не прошла"
             } finally {
                 _busy.value = false
             }

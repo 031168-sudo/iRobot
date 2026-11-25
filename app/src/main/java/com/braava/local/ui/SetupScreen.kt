@@ -471,8 +471,10 @@ private fun RobotCard(
 private fun XiaomiSetup(viewModel: MainViewModel, onAdded: () -> Unit) {
     val devices by viewModel.xiaomiDevices.collectAsStateWithLifecycle()
     val busy by viewModel.busy.collectAsStateWithLifecycle()
+    val needCode by viewModel.xiaomiNeedCode.collectAsStateWithLifecycle()
 
     var login by remember { mutableStateOf("") }
+    var code by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var ip by remember { mutableStateOf("") }
     var manualToken by remember { mutableStateOf("") }
@@ -514,6 +516,33 @@ private fun XiaomiSetup(viewModel: MainViewModel, onAdded: () -> Unit) {
         Icon(Icons.Filled.CloudDownload, contentDescription = null)
         Spacer(Modifier.width(8.dp))
         Text("Получить доступ к роботам")
+    }
+
+    if (needCode) {
+        Spacer(Modifier.height(12.dp))
+        Text("Шаг 1б. Код из письма", style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.height(6.dp))
+        Text(
+            "Xiaomi отправил код на почту аккаунта. Он одноразовый.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(8.dp))
+        OutlinedTextField(
+            value = code,
+            onValueChange = { code = it },
+            label = { Text("Код из письма") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.height(8.dp))
+        Button(
+            onClick = { viewModel.xiaomiSubmitCode(code) },
+            enabled = code.isNotBlank() && !busy,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text("Подтвердить код")
+        }
     }
 
     if (devices.isNotEmpty()) {
