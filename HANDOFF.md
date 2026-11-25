@@ -4,7 +4,10 @@
 Глубокие детали протокола — в `SESSION.md`, правила проекта — в `AGENTS.md`.
 
 - **Репозиторий:** https://github.com/031168-sudo/iRobot
-- **Версия:** 2.13 (`versionCode 24`), ветка `master`.
+- **Версия:** 2.14 (`versionCode 25`), ветка `master`.
+- **Что нового в 2.14:** после 2FA `userId` и `serviceToken` выбираются по домену
+  cookie (`.xiaomi.com` / `.sts.api.io.mi.com`), а не первый попавшийся:
+  иначе в облако уходил e-mail вместо числового id и приходил 401.
 - **Что нового в 2.13:** исправлен вход с 2FA — цепочка редиректов
   `identity/result/check → Auth2/end → STS` проходится вручную, без
   авто-перехода OkHttp, иначе терялся `Location` и появлялось «нет Auth2/end».

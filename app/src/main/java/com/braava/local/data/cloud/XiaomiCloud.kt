@@ -191,9 +191,17 @@ class XiaomiCloud(
         val stsUrl = sts
         client.newCall(Request.Builder().url(stsUrl).build()).execute().close()
 
-        val serviceToken = jar.find("serviceToken")?.value
+        val serviceToken = jar.find("serviceToken", ".sts.api.io.mi.com")?.value
+            ?: jar.find("serviceToken")?.value
             ?: throw CloudException("2FA: нет serviceToken")
-        val userId = jar.find("userId")?.value.orEmpty()
+        // The jar may hold several "userId" cookies (the e-mail from step 1
+        // and the numeric id set by the identity flow); the API needs the
+        // numeric one.
+        val userId = listOf(".xiaomi.com", ".sts.api.io.mi.com", null)
+            .firstNotNullOfOrNull { domain ->
+                jar.find("userId", domain)?.value?.takeIf { value -> value.all(Char::isDigit) }
+            }
+            ?: throw CloudException("2FA: нет числового userId")
         val session = Session(userId, serviceToken, ssecurity)
         LoginResult.Devices(listDevices(session), session)
     }
@@ -367,7 +375,12 @@ class XiaomiCloud(
         val client = http.newBuilder().cookieJar(CookieJar.NO_COOKIES).build()
         val text = client.newCall(request).execute().use { response ->
             if (!response.isSuccessful) {
-                throw CloudException("Облако Xiaomi вернуло ${response.code}")
+                val hint = if (response.code == 401) {
+                    " (userId=${session.userId}, токен ${session.serviceToken.length} симв.)"
+                } else {
+                    ""
+                }
+                throw CloudException("Облако Xiaomi вернуло ${response.code}$hint")
             }
             response.body?.string().orEmpty().trim()
         }
@@ -474,7 +487,8 @@ class XiaomiCloud(
         override fun loadForRequest(url: HttpUrl): List<Cookie> =
             items.filter { it.matches(url) }
 
-        fun find(name: String): Cookie? = items.firstOrNull { it.name == name }
+        fun find(name: String, domain: String? = null): Cookie? =
+            items.firstOrNull { it.name == name && (domain == null || it.domain == domain) }
     }
 
     private class Rc4(key: ByteArray) {
