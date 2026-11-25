@@ -32,6 +32,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -44,9 +45,14 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.braava.local.data.NetworkDiagnostics
 import com.braava.local.data.RobotConfig
+import com.braava.local.data.XiaomiCleanRecord
+import com.braava.local.data.XiaomiConsumables
 import com.braava.local.data.XiaomiStatus
 import com.braava.local.data.xiaomi.MiioDiscovery
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
  * Control screen for a Xiaomi/Roborock vacuum: local miIO only, no cloud.
@@ -70,6 +76,10 @@ fun XiaomiControlScreen(
     val cloudMessage by viewModel.xiaomiCloudMessage.collectAsStateWithLifecycle()
     val commandLog by viewModel.xiaomiLog.collectAsStateWithLifecycle()
     val roomNames by viewModel.xiaomiRoomNames.collectAsStateWithLifecycle()
+    val history by viewModel.xiaomiHistory.collectAsStateWithLifecycle()
+    val consumables by viewModel.xiaomiConsumables.collectAsStateWithLifecycle()
+    val soundVolume by viewModel.xiaomiSoundVolume.collectAsStateWithLifecycle()
+    val extraBusy by viewModel.xiaomiExtraBusy.collectAsStateWithLifecycle()
 
     var roomsLoaded by remember { mutableStateOf(false) }
     var ipDialogOpen by remember { mutableStateOf(false) }
@@ -78,6 +88,11 @@ fun XiaomiControlScreen(
     var logOpen by remember { mutableStateOf(false) }
     var renameSegment by remember { mutableStateOf<Int?>(null) }
     var renameDraft by remember { mutableStateOf("") }
+    var historyOpen by remember { mutableStateOf(false) }
+    var consumablesOpen by remember { mutableStateOf(false) }
+    var soundOpen by remember { mutableStateOf(false) }
+    var manualOpen by remember { mutableStateOf(false) }
+    var rcSeq by remember { mutableIntStateOf(1) }
     var diagnosticsLines by remember { mutableStateOf<List<String>>(emptyList()) }
     var foundOpen by remember { mutableStateOf(false) }
     var searching by remember { mutableStateOf(false) }
@@ -201,6 +216,45 @@ fun XiaomiControlScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+
+            Spacer(Modifier.height(20.dp))
+            Text("Дополнительно", style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    onClick = { historyOpen = true },
+                    enabled = cloudReady,
+                    modifier = Modifier.weight(1f),
+                ) { Text("История") }
+                OutlinedButton(
+                    onClick = { consumablesOpen = true },
+                    enabled = cloudReady,
+                    modifier = Modifier.weight(1f),
+                ) { Text("Расходники") }
+            }
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    onClick = { soundOpen = true },
+                    enabled = cloudReady,
+                    modifier = Modifier.weight(1f),
+                ) { Text("Звук") }
+                OutlinedButton(
+                    onClick = { viewModel.xiaomiSpot() },
+                    enabled = cloudReady,
+                    modifier = Modifier.weight(1f),
+                ) { Text("Точечная") }
+            }
+            Spacer(Modifier.height(8.dp))
+            OutlinedButton(
+                onClick = { manualOpen = true },
+                enabled = cloudReady,
+            ) { Text("Ручное управление") }
+            Text(
+                "Эти данные и команды идут через облако Xiaomi.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
 
             Spacer(Modifier.height(20.dp))
             Text("Комнаты", style = MaterialTheme.typography.titleMedium)
@@ -374,6 +428,148 @@ fun XiaomiControlScreen(
         )
     }
 
+    if (historyOpen) {
+        LaunchedEffect(historyOpen) { viewModel.xiaomiLoadHistory() }
+        AlertDialog(
+            onDismissRequest = { historyOpen = false },
+            confirmButton = {
+                TextButton(onClick = { historyOpen = false }) { Text("Закрыть") }
+            },
+            dismissButton = {
+                TextButton(onClick = { viewModel.xiaomiLoadHistory() }) { Text("Обновить") }
+            },
+            title = { Text("История уборок") },
+            text = {
+                Column(
+                    Modifier
+                        .height(420.dp)
+                        .verticalScroll(rememberScrollState()),
+                ) {
+                    if (extraBusy) {
+                        LinearProgressIndicator(Modifier.fillMaxWidth())
+                        Spacer(Modifier.height(8.dp))
+                    }
+                    if (history.isEmpty()) {
+                        Text("Нет данных", style = MaterialTheme.typography.bodySmall)
+                    }
+                    history.forEach { record ->
+                        Text(formatHistory(record), style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            },
+        )
+    }
+
+    if (consumablesOpen) {
+        LaunchedEffect(consumablesOpen) { viewModel.xiaomiLoadConsumables() }
+        AlertDialog(
+            onDismissRequest = { consumablesOpen = false },
+            confirmButton = {
+                TextButton(onClick = { consumablesOpen = false }) { Text("Закрыть") }
+            },
+            title = { Text("Расходники") },
+            text = {
+                Column {
+                    val value = consumables
+                    if (value == null) {
+                        Text("Нет данных", style = MaterialTheme.typography.bodySmall)
+                    } else {
+                        ConsumableRow("Фильтр", value.filterSec, 540_000)
+                        ConsumableRow("Основная щётка", value.mainBrushSec, 1_080_000)
+                        ConsumableRow("Боковая щётка", value.sideBrushSec, 720_000)
+                        ConsumableRow("Датчик", value.sensorSec, 108_000)
+                    }
+                }
+            },
+        )
+    }
+
+    if (soundOpen) {
+        LaunchedEffect(soundOpen) { viewModel.xiaomiLoadSound() }
+        AlertDialog(
+            onDismissRequest = { soundOpen = false },
+            confirmButton = {
+                TextButton(onClick = { soundOpen = false }) { Text("Закрыть") }
+            },
+            title = { Text("Громкость") },
+            text = {
+                Column {
+                    Text("Сейчас: ${soundVolume ?: "—"} из 100")
+                    Spacer(Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(
+                            onClick = { viewModel.xiaomiSetSound((soundVolume ?: 0) - 10) },
+                        ) { Text("−10") }
+                        OutlinedButton(
+                            onClick = { viewModel.xiaomiSetSound((soundVolume ?: 0) + 10) },
+                        ) { Text("+10") }
+                    }
+                }
+            },
+        )
+    }
+
+    if (manualOpen) {
+        LaunchedEffect(manualOpen) { viewModel.xiaomiRcStart() }
+        AlertDialog(
+            onDismissRequest = {
+                viewModel.xiaomiRcEnd()
+                manualOpen = false
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.xiaomiRcEnd()
+                    manualOpen = false
+                }) { Text("Выйти") }
+            },
+            title = { Text("Ручное управление") },
+            text = {
+                Column {
+                    Text(
+                        "Кнопки двигают робота примерно на 0,6 с. Будьте осторожны.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Row(
+                        horizontalArrangement = Arrangement.Center,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        OutlinedButton(onClick = {
+                            viewModel.xiaomiRcMove(0.3, 0.0, 600, rcSeq)
+                            rcSeq++
+                        }) { Text("↑") }
+                    }
+                    Row(
+                        horizontalArrangement = Arrangement.Center,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        OutlinedButton(onClick = {
+                            viewModel.xiaomiRcMove(0.0, 0.6, 600, rcSeq)
+                            rcSeq++
+                        }) { Text("←") }
+                        OutlinedButton(onClick = {
+                            viewModel.xiaomiRcMove(0.0, 0.0, 300, rcSeq)
+                            rcSeq++
+                        }) { Text("Стоп") }
+                        OutlinedButton(onClick = {
+                            viewModel.xiaomiRcMove(0.0, -0.6, 600, rcSeq)
+                            rcSeq++
+                        }) { Text("→") }
+                    }
+                    Row(
+                        horizontalArrangement = Arrangement.Center,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        OutlinedButton(onClick = {
+                            viewModel.xiaomiRcMove(-0.3, 0.0, 600, rcSeq)
+                            rcSeq++
+                        }) { Text("↓") }
+                    }
+                }
+            },
+        )
+    }
+
     if (diagnosticsOpen) {
         AlertDialog(
             onDismissRequest = { diagnosticsOpen = false },
@@ -467,5 +663,25 @@ private fun XiaomiButton(
 ) {
     OutlinedButton(onClick = onClick, modifier = modifier) {
         Text(text)
+    }
+}
+
+private fun formatHistory(record: XiaomiCleanRecord): String {
+    val date = SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.US)
+        .format(Date(record.start * 1000))
+    val minutes = record.durationSec / 60
+    val area = record.areaMm2 / 1_000_000.0
+    return "$date • $minutes мин • %.1f м²".format(area)
+}
+
+@Composable
+private fun ConsumableRow(label: String, usedSec: Long, limitSec: Long) {
+    val progress = (usedSec.toFloat() / limitSec).coerceIn(0f, 1f)
+    Column(Modifier.padding(vertical = 4.dp)) {
+        Text("$label: ${usedSec / 3600} ч из ${limitSec / 3600} ч")
+        LinearProgressIndicator(
+            progress = { progress },
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }

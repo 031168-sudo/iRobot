@@ -20,6 +20,19 @@ import java.util.Date
 import java.util.Locale
 
 /** Parsed `get_status` reply of a Xiaomi/Roborock vacuum. */
+data class XiaomiCleanRecord(
+    val start: Long,
+    val durationSec: Int,
+    val areaMm2: Long,
+)
+
+data class XiaomiConsumables(
+    val filterSec: Long,
+    val mainBrushSec: Long,
+    val sideBrushSec: Long,
+    val sensorSec: Long,
+)
+
 data class XiaomiStatus(
     val state: Int,
     val errorCode: Int,
@@ -89,6 +102,18 @@ class XiaomiRepository(context: Context) {
 
     private val _log = MutableStateFlow<List<String>>(emptyList())
     val log: StateFlow<List<String>> = _log.asStateFlow()
+
+    private val _history = MutableStateFlow<List<XiaomiCleanRecord>>(emptyList())
+    val history: StateFlow<List<XiaomiCleanRecord>> = _history.asStateFlow()
+
+    private val _consumables = MutableStateFlow<XiaomiConsumables?>(null)
+    val consumables: StateFlow<XiaomiConsumables?> = _consumables.asStateFlow()
+
+    private val _soundVolume = MutableStateFlow<Int?>(null)
+    val soundVolume: StateFlow<Int?> = _soundVolume.asStateFlow()
+
+    private val _extraBusy = MutableStateFlow(false)
+    val extraBusy: StateFlow<Boolean> = _extraBusy.asStateFlow()
 
     fun setCloud(session: XiaomiCloud.Session?, did: String?) {
         cloudSession = session
@@ -170,6 +195,136 @@ class XiaomiRepository(context: Context) {
     private fun log(line: String) {
         val stamp = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date())
         _log.value = (_log.value + "$stamp  $line").takeLast(50)
+    }
+
+    fun loadHistory() {
+        val cfg = config ?: return
+        scope.launch {
+            _extraBusy.value = true
+            try {
+                val summary = cloudCommand("get_clean_summary")
+                    ?: throw IllegalStateException("Нет облачной сессии")
+                val result = summary.optJSONArray("result")
+                    ?: throw IllegalStateException("Нет истории уборок")
+                val stamps = result.optJSONArray(3) ?: JSONArray()
+                val records = mutableListOf<XiaomiCleanRecord>()
+                for (index in 0 until minOf(stamps.length(), 10)) {
+                    val stamp = stamps.optLong(index)
+                    val record = cloudCommand(
+                        "get_clean_record",
+                        JSONArray().put(stamp),
+                    ) ?: continue
+                    val arr = record.optJSONArray("result")?.optJSONArray(0) ?: continue
+                    records += XiaomiCleanRecord(
+                        start = arr.optLong(0),
+                        durationSec = arr.optInt(2),
+                        areaMm2 = arr.optLong(3),
+                    )
+                }
+                _history.value = records
+                _error.value = null
+                log("↓ история: ${records.size} записей")
+            } catch (e: Exception) {
+                _error.value = describe(e)
+                log("✗ история: ${describe(e)}")
+            } finally {
+                _extraBusy.value = false
+            }
+        }
+    }
+
+    fun loadConsumables() {
+        val cfg = config ?: return
+        scope.launch {
+            _extraBusy.value = true
+            try {
+                val json = cloudCommand("get_consumable")
+                    ?: throw IllegalStateException("Нет облачной сессии")
+                val obj = json.optJSONArray("result")?.optJSONObject(0)
+                    ?: throw IllegalStateException("Нет данных о расходниках")
+                _consumables.value = XiaomiConsumables(
+                    filterSec = obj.optLong("filter_work_time"),
+                    mainBrushSec = obj.optLong("main_brush_work_time"),
+                    sideBrushSec = obj.optLong("side_brush_work_time"),
+                    sensorSec = obj.optLong("sensor_dirty_time"),
+                )
+                _error.value = null
+            } catch (e: Exception) {
+                _error.value = describe(e)
+                log("✗ расходники: ${describe(e)}")
+            } finally {
+                _extraBusy.value = false
+            }
+        }
+    }
+
+    fun loadSound() {
+        val cfg = config ?: return
+        scope.launch {
+            try {
+                val json = cloudCommand("get_sound_volume")
+                    ?: throw IllegalStateException("Нет облачной сессии")
+                _soundVolume.value = json.optJSONArray("result")?.optInt(0)
+                _error.value = null
+            } catch (e: Exception) {
+                _error.value = describe(e)
+            }
+        }
+    }
+
+    fun setSound(volume: Int) {
+        val cfg = config ?: return
+        val value = volume.coerceIn(0, 100)
+        scope.launch {
+            runCatching {
+                cloudCommand("change_sound_volume", JSONArray().put(value))
+                    ?: throw IllegalStateException("Нет облачной сессии")
+            }.onSuccess {
+                _soundVolume.value = value
+                _error.value = null
+            }.onFailure {
+                _error.value = describe(it)
+            }
+        }
+    }
+
+    fun spot() {
+        val cfg = config ?: return
+        scope.launch {
+            _busy.value = true
+            try {
+                cloudCommand("app_spot") ?: throw IllegalStateException("Нет облачной сессии")
+                log("↓ точечная уборка запущена")
+                delay(1200)
+                loadStatus(cfg)
+            } catch (e: Exception) {
+                _error.value = describe(e)
+            } finally {
+                _busy.value = false
+            }
+        }
+    }
+
+    fun rcStart() {
+        val cfg = config ?: return
+        scope.launch { runCatching { cloudCommand("app_rc_start") } }
+    }
+
+    fun rcMove(velocity: Double, omega: Double, durationMs: Int, seq: Int) {
+        val cfg = config ?: return
+        val params = JSONArray().put(
+            JSONObject()
+                .put("velocity", velocity)
+                .put("omega", omega)
+                .put("duration", durationMs)
+                .put("seqnum", seq),
+        )
+        scope.launch { runCatching { cloudCommand("app_rc_move", params) } }
+    }
+
+    fun rcEnd() {
+        val cfg = config ?: return
+        scope.launch { runCatching { cloudCommand("app_rc_end") } }
     }
 
     private fun startPolling() {

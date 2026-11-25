@@ -49,6 +49,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val xiaomiError = xiaomi.error
     val xiaomiBusy = xiaomi.busy
     val xiaomiLog = xiaomi.log
+    val xiaomiHistory = xiaomi.history
+    val xiaomiConsumables = xiaomi.consumables
+    val xiaomiSoundVolume = xiaomi.soundVolume
+    val xiaomiExtraBusy = xiaomi.extraBusy
 
     private val _xiaomiDevices = MutableStateFlow<List<XiaomiCloud.XiaomiDevice>>(emptyList())
     val xiaomiDevices = _xiaomiDevices.asStateFlow()
@@ -449,6 +453,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun xiaomiFind() = xiaomi.find()
 
     fun xiaomiClean(segments: List<Int>) = xiaomi.cleanSegments(segments)
+
+    fun xiaomiLoadHistory() = xiaomi.loadHistory()
+
+    fun xiaomiLoadConsumables() = xiaomi.loadConsumables()
+
+    fun xiaomiLoadSound() = xiaomi.loadSound()
+
+    fun xiaomiSetSound(volume: Int) = xiaomi.setSound(volume)
+
+    fun xiaomiSpot() = xiaomi.spot()
+
+    fun xiaomiRcStart() = xiaomi.rcStart()
+
+    fun xiaomiRcMove(velocity: Double, omega: Double, durationMs: Int, seq: Int) =
+        xiaomi.rcMove(velocity, omega, durationMs, seq)
+
+    fun xiaomiRcEnd() = xiaomi.rcEnd()
 
     fun xiaomiRenameRoom(segment: Int, name: String) {
         val config = repository.selected.value ?: return

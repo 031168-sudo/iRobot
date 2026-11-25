@@ -251,6 +251,52 @@ class XiaomiCloud(
         return signedPost(session, "https://api.io.mi.com/app/home/rpc/$did", data)
     }
 
+    suspend fun cleanSummary(session: Session, did: String): JSONObject =
+        sendCommand(session, did, "get_clean_summary", JSONArray())
+
+    suspend fun cleanRecord(session: Session, did: String, record: Long): JSONObject =
+        sendCommand(session, did, "get_clean_record", JSONArray().put(record))
+
+    suspend fun consumables(session: Session, did: String): JSONObject =
+        sendCommand(session, did, "get_consumable", JSONArray())
+
+    suspend fun soundVolume(session: Session, did: String): Int? =
+        sendCommand(session, did, "get_sound_volume", JSONArray())
+            .optJSONArray("result")
+            ?.optInt(0)
+
+    suspend fun setSoundVolume(session: Session, did: String, volume: Int): JSONObject =
+        sendCommand(session, did, "change_sound_volume", JSONArray().put(volume))
+
+    suspend fun spot(session: Session, did: String): JSONObject =
+        sendCommand(session, did, "app_spot", JSONArray())
+
+    suspend fun rcStart(session: Session, did: String): JSONObject =
+        sendCommand(session, did, "app_rc_start", JSONArray())
+
+    suspend fun rcMove(
+        session: Session,
+        did: String,
+        velocity: Double,
+        omega: Double,
+        durationMs: Int,
+        seq: Int,
+    ): JSONObject = sendCommand(
+        session,
+        did,
+        "app_rc_move",
+        JSONArray().put(
+            JSONObject()
+                .put("velocity", velocity)
+                .put("omega", omega)
+                .put("duration", durationMs)
+                .put("seqnum", seq),
+        ),
+    )
+
+    suspend fun rcEnd(session: Session, did: String): JSONObject =
+        sendCommand(session, did, "app_rc_end", JSONArray())
+
     suspend fun findDid(session: Session, token: String): String? = withContext(Dispatchers.IO) {
         listDevices(session).firstOrNull { it.token == token.trim() }?.did
     }

@@ -12,8 +12,8 @@ android {
         applicationId = "com.braava.local"
         minSdk = 26
         targetSdk = 35
-        versionCode = 39
-        versionName = "2.28"
+        versionCode = 40
+        versionName = "2.29"
     }
 
     signingConfigs {
