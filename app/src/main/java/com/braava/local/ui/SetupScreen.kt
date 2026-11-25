@@ -1,5 +1,10 @@
 package com.braava.local.ui
 
+import android.content.Context
+import android.content.Intent
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -45,16 +50,20 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.braava.local.data.RobotConfig
+import com.braava.local.data.RobotKind
 import com.braava.local.data.cloud.IrobotCloud
 import com.braava.local.data.cloud.XiaomiCloud
 import com.braava.local.data.discovery.RobotDiscovery
+import java.io.File
 
 @Composable
 fun SetupScreen(
@@ -66,8 +75,31 @@ fun SetupScreen(
     val robots by viewModel.robots.collectAsStateWithLifecycle()
     val selected by viewModel.config.collectAsStateWithLifecycle()
     val discovered by viewModel.discovered.collectAsStateWithLifecycle()
+    val context = LocalContext.current
     var tab by remember { mutableIntStateOf(0) }
     var editing by remember { mutableStateOf<RobotConfig?>(null) }
+    val importLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri != null) {
+            val text = runCatching {
+                context.contentResolver.openInputStream(uri)
+                    ?.bufferedReader()
+                    ?.use { it.readText() }
+            }.getOrNull()
+            if (text.isNullOrBlank()) {
+                Toast.makeText(context, "Не удалось прочитать файл", Toast.LENGTH_LONG).show()
+            } else {
+                val count = runCatching { viewModel.importRobots(text) }.getOrElse { 0 }
+                val message = if (count > 0) {
+                    "Импортировано роботов: $count"
+                } else {
+                    "В файле нет подходящих роботов"
+                }
+                Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+            }
+        }
+    }
 
     Column(
         modifier = modifier
@@ -113,6 +145,31 @@ fun SetupScreen(
             Text("Добавить робота", style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(12.dp))
         }
+
+        Text("Резервная копия настроек", style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.height(6.dp))
+        Text(
+            "Сохраняет всех роботов вместе с токенами в файл — пригодится после " +
+                "переустановки приложения.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(8.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(
+                onClick = { exportRobots(context, viewModel.exportRobots()) },
+                modifier = Modifier.weight(1f),
+            ) {
+                Text("Экспорт")
+            }
+            OutlinedButton(
+                onClick = { importLauncher.launch(arrayOf("application/json")) },
+                modifier = Modifier.weight(1f),
+            ) {
+                Text("Импорт")
+            }
+        }
+        Spacer(Modifier.height(20.dp))
 
         Row(Modifier.fillMaxWidth()) {
             TabButton("iRobot", tab == 0, Modifier.weight(1f)) { tab = 0 }
@@ -479,6 +536,14 @@ private fun XiaomiSetup(viewModel: MainViewModel, onAdded: () -> Unit) {
     var ip by remember { mutableStateOf("") }
     var manualToken by remember { mutableStateOf("") }
     var selected by remember { mutableStateOf<XiaomiCloud.XiaomiDevice?>(null) }
+    val savedRobot by viewModel.config.collectAsStateWithLifecycle()
+    LaunchedEffect(savedRobot) {
+        val config = savedRobot
+        if (config != null && config.kind == RobotKind.XIAOMI) {
+            if (ip.isBlank()) ip = config.ip
+            if (manualToken.isBlank()) manualToken = config.token.orEmpty()
+        }
+    }
 
     Text("Шаг 1. Вход в Mi-аккаунт", style = MaterialTheme.typography.titleMedium)
     Spacer(Modifier.height(8.dp))
@@ -647,5 +712,26 @@ fun DiscoveredList(
                 }
             }
         }
+    }
+}
+
+private fun exportRobots(context: Context, json: String) {
+    runCatching {
+        val dir = File(context.cacheDir, "diagnostics").apply { mkdirs() }
+        val file = File(dir, "myrobot-backup.json")
+        file.writeText(json)
+        val uri = FileProvider.getUriForFile(
+            context,
+            "${context.packageName}.fileprovider",
+            file,
+        )
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "application/json"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(Intent.createChooser(intent, "Сохранить настройки"))
+    }.onFailure {
+        Toast.makeText(context, "Не удалось сохранить: ${it.message}", Toast.LENGTH_LONG).show()
     }
 }

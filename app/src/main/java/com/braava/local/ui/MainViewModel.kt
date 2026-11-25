@@ -204,6 +204,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun updateRobot(config: RobotConfig) = repository.updateRobot(config)
 
+    fun exportRobots(): String = repository.exportJson()
+
+    fun importRobots(raw: String): Int = repository.importJson(raw)
+
     fun saveManual(blid: String, password: String, ip: String, name: String?): Boolean {
         if (blid.isBlank() || password.isBlank() || ip.isBlank()) {
             _error.value = "Заполните BLID, пароль и IP-адрес"

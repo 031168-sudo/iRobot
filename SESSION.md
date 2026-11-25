@@ -10,7 +10,7 @@ iRobot Braava Jet m6** (в обход облака) и все находки п�
 - **Пакет:** `com.braava.local`
 - **Стек:** Kotlin + Jetpack Compose, Gradle 8.11.1 / AGP 8.7.3 / Kotlin 2.0.21
 - **Репозиторий:** https://github.com/031168-sudo/iRobot
-- **Версия:** 2.16 (`versionCode 27`)
+- **Версия:** 2.17 (`versionCode 28`)
 - **APK:** GitHub Actions, артефакт `braavalocal-debug-apk`; локальная публикация больше не используется.
 
 ---

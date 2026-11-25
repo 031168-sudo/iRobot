@@ -117,6 +117,64 @@ class RobotRepository(context: Context) {
         }
     }
 
+    /** JSON backup of all saved robots, including local tokens. */
+    fun exportJson(): String {
+        val array = org.json.JSONArray()
+        _robots.value.forEach { robot ->
+            array.put(
+                JSONObject()
+                    .put("blid", robot.blid)
+                    .put("password", robot.password)
+                    .put("ip", robot.ip)
+                    .put("name", robot.name)
+                    .put("sku", robot.sku)
+                    .put("kind", robot.kind.name)
+                    .put("token", robot.token),
+            )
+        }
+        return array.toString(2)
+    }
+
+    /** Merges robots from a backup; returns how many entries were imported. */
+    fun importJson(raw: String): Int {
+        val array = runCatching { org.json.JSONArray(raw) }
+            .getOrElse { throw IllegalArgumentException("Файл не похож на резервную копию") }
+        val imported = mutableListOf<RobotConfig>()
+        for (index in 0 until array.length()) {
+            val obj = array.optJSONObject(index) ?: continue
+            val kind = runCatching {
+                RobotKind.valueOf(obj.optString("kind", RobotKind.IROBOT.name))
+            }.getOrDefault(RobotKind.IROBOT)
+            val config = RobotConfig(
+                blid = obj.optString("blid").trim(),
+                password = obj.optString("password"),
+                ip = obj.optString("ip").trim(),
+                name = obj.optString("name").takeIf { it.isNotBlank() },
+                sku = obj.optString("sku").takeIf { it.isNotBlank() },
+                kind = kind,
+                token = obj.optString("token").takeIf { it.isNotBlank() },
+            )
+            val valid = config.blid.isNotBlank() && config.ip.isNotBlank() &&
+                (config.password.isNotBlank() || config.token != null)
+            if (valid) imported += config
+        }
+        if (imported.isEmpty()) return 0
+        val merged = LinkedHashMap<String, RobotConfig>()
+        _robots.value.forEach { merged[it.blid] = it }
+        imported.forEach { merged[it.blid] = it }
+        val list = merged.values.toList()
+        _robots.value = list
+        store.saveRobots(list)
+        val selected = _selected.value
+        if (selected == null || list.none { it.blid == selected.blid }) {
+            list.firstOrNull()?.let {
+                setSelected(it)
+                connect()
+            }
+        }
+        return imported.size
+    }
+
     fun selectRobot(blid: String, force: Boolean = false) {
         val config = _robots.value.firstOrNull { it.blid == blid } ?: return
         if (!force && _selected.value?.blid == blid && (connecting || client != null)) return
